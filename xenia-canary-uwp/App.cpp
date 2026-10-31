@@ -18,6 +18,7 @@
 #include <winrt/Windows.UI.Composition.h>
 #include <winrt/Windows.UI.Core.h>
 #include <winrt/Windows.UI.Input.h>
+#include <winrt/Windows.UI.Popups.h>
 #include <winrt/Windows.UI.ViewManagement.h>
 #include <winrt/windows.graphics.display.core.h>
 
@@ -81,6 +82,15 @@ struct App : implements<App, IFrameworkViewSource, IFrameworkView>
           UWP::SetDPI(displayInfo.LogicalDpi());
         }
 
+        // Xbox gives "App" titles a small memory budget that Xenia can't
+        // run in. Explain how to switch to "Game" instead of crashing.
+        const uint64_t memory_limit =
+            winrt::Windows::System::MemoryManager::AppMemoryUsageLimit();
+        if (memory_limit < kMinMemoryLimit) {
+          ShowGameModeNotice(memory_limit);
+          return;
+        }
+
         UWP::StartXenia();
 
         while (true) {
@@ -108,6 +118,25 @@ struct App : implements<App, IFrameworkViewSource, IFrameworkView>
                 return;
               });
         }
+    }
+
+    static constexpr uint64_t kMinMemoryLimit = 3ull * 1024 * 1024 * 1024;
+
+    void ShowGameModeNotice(uint64_t memory_limit) {
+      std::wstring text =
+          L"Xenia Xenon is running as an App, which only gets " +
+          std::to_wstring(memory_limit / (1024 * 1024)) +
+          L" MB of memory. The emulator needs Game mode.\n\n"
+          L"In Dev Home, highlight Xenia Xenon, press the View button, "
+          L"choose View details and set App type to Game. Then open it "
+          L"again.";
+      winrt::Windows::UI::Popups::MessageDialog dialog(
+          winrt::hstring(text), L"Switch Xenia Xenon to Game mode");
+      dialog.Commands().Append(winrt::Windows::UI::Popups::UICommand(L"Close"));
+      dialog.ShowAsync().Completed(
+          [](auto const&, auto) { CoreApplication::Exit(); });
+      CoreWindow::GetForCurrentThread().Dispatcher().ProcessEvents(
+          CoreProcessEventsOption::ProcessUntilQuit);
     }
 
     void OnActivate(
