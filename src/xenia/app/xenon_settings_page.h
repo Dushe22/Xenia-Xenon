@@ -584,7 +584,12 @@ inline bool Draw(State& st, const std::vector<Category>& cats, float s,
   const float pane_x = origin.x + list_w + gap;
   const float pane_w = std::max(100.0f, avail.x - list_w - gap);
   const float top = origin.y + 8.0f * s;
-  const float bottom = origin.y + avail.y;
+  // Use the visible area: the content region can extend past the clip rect.
+  const float bottom =
+      std::min(origin.y + avail.y,
+               std::min(dl->GetClipRectMax().y,
+                        ImGui::GetWindowPos().y + ImGui::GetWindowSize().y)) -
+      8.0f * s;
 
   auto with_alpha = [](ImU32 c, float a) {
     const int alpha = int(((c >> IM_COL32_A_SHIFT) & 0xFF) * a);
