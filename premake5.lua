@@ -1,3 +1,6 @@
+-- Compatibility shim: bundled premake predates linktimeoptimization().
+if not linktimeoptimization then function linktimeoptimization(_) end end
+
 include("tools/build")
 if _ACTION == "export-compile-commands" then
   require("third_party/premake-export-compile-commands/export-compile-commands")
