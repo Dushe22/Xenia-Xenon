@@ -253,6 +253,8 @@ namespace app {
 
 // Lets the right stick scroll the current window (frontend pages).
 static bool g_xenon_settings_on_right = false;
+static xe::app::xenon_settings::State* g_xenon_active_page_state = nullptr;
+static constexpr char kXenonVersion[] = "1.1.8.1";
 static bool g_xenon_pergame_on_right = false;
 
 static void XenonGamepadScroll() {
@@ -5926,339 +5928,228 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
       if (active_frontend_page_ == FrontendPage::kSettings) {
         // Xenon settings screen (data-driven, owns its controller input).
         static xe::app::xenon_settings::State xenon_settings_state;
+        g_xenon_active_page_state = &xenon_settings_state;
         g_xenon_settings_on_right = xe::app::xenon_settings::Draw(
-            xenon_settings_state, display_scale, xe::ui::GetXenonDisplayFont());
+            xenon_settings_state, xe::app::xenon_settings::Categories(),
+            display_scale, xe::ui::GetXenonDisplayFont());
       }
 
       if (active_frontend_page_ == FrontendPage::kPaths) {
-        if (!ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId)) {
-          if (ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false)) {
-            // B button pressed - clear selection and exit list focus
-            if (selected_path_ != "") {
-              selected_path_ = "";
-              // Request focus to move away from the list
-              paths_focus_requested = true;
-            }
-          }
-          if (ImGui::IsKeyPressed(ImGuiKey_GamepadFaceLeft, false)) {
-            // X button pressed - request focus to paths list
-            paths_focus_requested = true;
-          }
-        }
-
-        const float paths_plane_margin = 12.0f * display_scale;
-        ImVec2 paths_plane_origin = ImGui::GetCursorPos();
-        ImVec2 paths_plane_avail = ImGui::GetContentRegionAvail();
-        ImVec2 paths_plane_size(
-            std::max(0.0f, paths_plane_avail.x - (paths_plane_margin * 2.0f)),
-            std::max(0.0f, paths_plane_avail.y - (paths_plane_margin * 2.0f)));
-        ImGui::SetCursorPos(ImVec2(paths_plane_origin.x + paths_plane_margin,
-                                   paths_plane_origin.y + paths_plane_margin));
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-        if (ImGui::BeginChild("##paths_editor_plane", paths_plane_size, false)) {
-          XenonGamepadScroll();
-          if (paths_focus_requested) {
-            ImGui::SetWindowFocus();
-          }
-          const float paths_content_offset_x = 15.0f * display_scale;
-          const float paths_content_offset_y = 15.0f * display_scale;
-          ImGui::Indent(paths_content_offset_x);
-          ImGui::Dummy(ImVec2(0.0f, paths_content_offset_y));
-
-          auto paths_list = UWP::GetPaths();
-          if (ImGui::BeginListBox("##folders")) {
-            for (size_t i = 0; i < paths_list.size(); ++i) {
-              if (paths_focus_requested && i == 0) {
-                ImGui::SetKeyboardFocusHere();
-              }
-              bool is_selected = (selected_path_ == paths_list[i]);
-              if (ImGui::Selectable(paths_list[i].c_str(), is_selected)) {
-                selected_path_ = paths_list[i];
-              }
-              if (ImGui::IsItemFocused()) {
-                paths_focus_requested = false;
-              }
-            }
-            ImGui::EndListBox();
-          }
-          
-          // Allow navigation out of list when Down is pressed (regardless of selection)
-          static bool navigating_to_buttons = false;
-          if (ImGui::IsKeyPressed(ImGuiKey_GamepadDpadDown, false) && 
-              !ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false)) {
-            // Move focus to buttons below
-            paths_focus_requested = false;
-            navigating_to_buttons = true;
-          }
-
-          if (selected_path_ == "") {
-            ImGui::BeginDisabled();
-          }
-
-          ImU32 path_button_color = selected_path_ == ""
-                                        ? IM_COL32(160, 160, 160, 255)
-                                        : IM_COL32(255, 255, 255, 255);
-          if (draw_text_button("##remove_path_button", "Remove Path",
-                               ImVec2(0.0f, 0.0f), path_button_color)) {
-            if (selected_path_ != "") {
+        // Xenon storage screen: game folders, web transfer, data folders.
+        namespace xs = xe::app::xenon_settings;
+        static xs::State xenon_storage_state;
+        std::vector<xs::Category> storage;
+        {
+          xs::Category folders{"Game folders", {}};
+          for (const auto& path : UWP::GetPaths()) {
+            xs::Option row = xs::Info(
+                path, nullptr,
+                "Xenon scans this folder for games. Press Y to remove it from "
+                "the list (the files are not deleted).");
+            row.secondary = [path]() {
               auto paths = UWP::GetPaths();
-              paths.erase(std::remove(paths.begin(), paths.end(), selected_path_),
+              paths.erase(std::remove(paths.begin(), paths.end(), path),
                           paths.end());
               UWP::SetGamePaths(paths);
-              selected_path_ = "";
-              // Reset focus to allow navigation after removal
-              paths_focus_requested = true;
-            }
+            };
+            row.secondary_label = "Remove";
+            folders.options.push_back(std::move(row));
           }
-          // Set focus to Remove Path button when navigating from list
-          if (navigating_to_buttons && selected_path_ != "") {
-            ImGui::SetKeyboardFocusHere();
-            navigating_to_buttons = false;
-          }
-          if (ImGui::IsItemFocused()) {
-            paths_focus_requested = false;
-            navigating_to_buttons = false;
-          }
-
-          if (selected_path_ == "") {
-            ImGui::EndDisabled();
-          }
-
-          ImGui::SameLine();
-          if (paths_focus_requested && paths_list.empty()) {
-            ImGui::SetKeyboardFocusHere();
-          }
-          if (draw_text_button("##add_path_button", "Add Path")) {
-            imgui_drawer()->SetIgnoreInput(true);
-            UWP::SelectFolder([this](std::string path) {
-              if (path != "") {
-                if (!UWP::TestPathPermissions(path)) {
-                  show_path_warning_ = true;
-                } else {
-                  auto paths = UWP::GetPaths();
-                  paths.push_back(path);
-                  UWP::SetGamePaths(paths);
-                }
-              }
-
-              imgui_drawer()->SetIgnoreInput(false);
-              // Reset focus to allow navigation after folder selection
-              paths_focus_requested = true;
-            });
-          }
-          if (ImGui::IsItemFocused()) {
-            paths_focus_requested = false;
-          }
-
-          auto ccache_root =
-              dynamic_cast<cvar::ConfigVar<std::filesystem::path>*>(
-                  cvar::ConfigVars->find("cache_root")->second);
-          auto ccontent_root =
-              dynamic_cast<cvar::ConfigVar<std::filesystem::path>*>(
-                  cvar::ConfigVars->find("content_root")->second);
-          auto cstorage_root =
-              dynamic_cast<cvar::ConfigVar<std::filesystem::path>*>(
-                  cvar::ConfigVars->find("storage_root")->second);
-
-          if (draw_text_button("##set_config_folders_path_button",
-                               "Set Config Folders Path")) {
-            imgui_drawer()->SetIgnoreInput(true);
-            UWP::SelectFolder([this, ccache_root, ccontent_root,
-                               cstorage_root](std::string path) {
-              if (path != "") {
-                if (!UWP::TestPathPermissions(path)) {
-                  ImGui::OpenPopup("Warning");
-                } else {
-                  ccache_root->SetConfigValue(
-                      std::filesystem::path(path + "\\cache"));
-                  ccontent_root->SetConfigValue(
-                      std::filesystem::path(path + "\\content"));
-                  cstorage_root->SetConfigValue(
-                      std::filesystem::path(path + "\\storage"));
-                  config::SaveConfig();
-                }
-              }
-
-              imgui_drawer()->SetIgnoreInput(false);
-              // Reset focus to allow navigation after folder selection
-              paths_focus_requested = true;
-            });
-          }
-          if (ImGui::IsItemFocused()) {
-            paths_focus_requested = false;
-          }
-
-          ImGui::SameLine();
-
-          ImGui::TextWrapped(
-              "Remember to configure your USB filesystem so its paths work ");
-          // Internal storage + LAN web transfer.
-          ImGui::Dummy(ImVec2(0.0f, 20.0f * display_scale));
-          ImGui::Separator();
-          ImGui::TextUnformatted("Internal storage & web transfer");
-          ImGui::TextWrapped(
-              "Games copied into the console's internal storage appear in the "
-              "game list automatically. Start the transfer server, then open "
-              "the address below in a browser on a PC or phone connected to "
-              "the same network.");
-          ImGui::TextWrapped("Internal games folder: %s",
-                             UWP::GetInternalGamesFolder().c_str());
-          const bool web_running = UWP::IsWebTransferRunning();
-          if (draw_text_button("##web_transfer_toggle",
-                               web_running ? "Stop Transfer Server"
-                                           : "Start Transfer Server")) {
-            if (web_running) {
-              UWP::StopWebTransfer();
-            } else {
-              UWP::StartWebTransfer();
-            }
-          }
-          ImGui::SameLine();
-          if (draw_text_button("##rescan_games_button", "Rescan Games")) {
-            UWP::RefreshPaths();
-          }
-          if (web_running) {
-            auto urls = UWP::GetWebTransferUrls();
-            if (urls.empty()) {
-              ImGui::TextWrapped("No network connection found.");
-            }
-            for (const auto& url : urls) {
-              ImGui::TextColored(ImVec4(0.42f, 0.75f, 0.29f, 1.0f), "Open: %s",
-                                 url.c_str());
-            }
-          }
-          ImGui::TextWrapped("%s", UWP::GetWebTransferStatusText().c_str());
-
-          if (show_path_warning_) {
-            ImGui::OpenPopup("Warning");
-            show_path_warning_ = false;
-            ImGui::SetNextWindowSize(
-                ImVec2(1600 * display_scale, 150 * display_scale));
-          }
-
-          if (ImGui::BeginPopupModal("Warning")) {
-            ImGui::TextWrapped(
-                "The folder path you have selected is not writable! Please check "
-                "that you have the correct permissions for the folder you have "
-                "selected.");
-            ImGui::Separator();
-            if (draw_text_button("##path_warning_ok_button", "OK")) {
-              ImGui::CloseCurrentPopup();
-            }
-
-            ImGui::EndPopup();
-          }
-
-          ImGui::EndChild();
+          folders.options.push_back(xs::Action(
+              "Add folder",
+              [this]() {
+                imgui_drawer()->SetIgnoreInput(true);
+                UWP::SelectFolder([this](std::string path) {
+                  if (!path.empty()) {
+                    if (!UWP::TestPathPermissions(path)) {
+                      show_path_warning_ = true;
+                    } else {
+                      auto paths = UWP::GetPaths();
+                      paths.push_back(path);
+                      UWP::SetGamePaths(paths);
+                    }
+                  }
+                  imgui_drawer()->SetIgnoreInput(false);
+                });
+              },
+              "Pick a folder that contains games, for example on a USB drive. "
+              "Remember to configure your USB filesystem so its paths work.",
+              nullptr, "Add"));
+          folders.options.push_back(xs::Action(
+              "Rescan games", []() { UWP::RefreshPaths(); },
+              "Scan every game folder again, including the internal games "
+              "folder.",
+              nullptr, "Rescan"));
+          storage.push_back(std::move(folders));
         }
-        ImGui::PopStyleVar();
+        {
+          xs::Category transfer{"Web transfer", {}};
+          transfer.options.push_back(xs::Action(
+              "Transfer server",
+              []() {
+                if (UWP::IsWebTransferRunning()) {
+                  UWP::StopWebTransfer();
+                } else {
+                  UWP::StartWebTransfer();
+                }
+              },
+              "Copy games from a PC or phone: turn the server on, then open "
+              "the address shown below in a browser on the same network.",
+              []() {
+                return std::string(UWP::IsWebTransferRunning() ? "On" : "Off");
+              },
+              "Start / stop"));
+          if (UWP::IsWebTransferRunning()) {
+            for (const auto& url : UWP::GetWebTransferUrls()) {
+              transfer.options.push_back(xs::Info(
+                  "Address", [url]() { return std::string(url); },
+                  "Open this address in a browser on a PC or phone connected "
+                  "to the same network as the console."));
+            }
+          }
+          transfer.options.push_back(xs::Info(
+              "Status",
+              []() { return std::string(UWP::GetWebTransferStatusText()); }));
+          transfer.options.push_back(xs::Info(
+              "Internal games folder",
+              []() { return std::string(UWP::GetInternalGamesFolder()); },
+              "Games copied over the network are stored here, on the "
+              "console's development storage."));
+          storage.push_back(std::move(transfer));
+        }
+        {
+          xs::Category data{"Data folders", {}};
+          data.options.push_back(xs::Action(
+              "Config folders location",
+              [this]() {
+                auto find_path = [](const char* name) {
+                  return dynamic_cast<
+                      cvar::ConfigVar<std::filesystem::path>*>(
+                      cvar::ConfigVars->find(name)->second);
+                };
+                auto ccache_root = find_path("cache_root");
+                auto ccontent_root = find_path("content_root");
+                auto cstorage_root = find_path("storage_root");
+                imgui_drawer()->SetIgnoreInput(true);
+                UWP::SelectFolder([this, ccache_root, ccontent_root,
+                                   cstorage_root](std::string path) {
+                  if (!path.empty()) {
+                    if (!UWP::TestPathPermissions(path)) {
+                      show_path_warning_ = true;
+                    } else {
+                      ccache_root->SetConfigValue(
+                          std::filesystem::path(path + "\\cache"));
+                      ccontent_root->SetConfigValue(
+                          std::filesystem::path(path + "\\content"));
+                      cstorage_root->SetConfigValue(
+                          std::filesystem::path(path + "\\storage"));
+                      config::SaveConfig();
+                    }
+                  }
+                  imgui_drawer()->SetIgnoreInput(false);
+                });
+              },
+              "Choose the folder where Xenia keeps its cache, content (saves, "
+              "DLC, title updates) and storage folders. Restart Xenon after "
+              "changing it.",
+              []() {
+                auto it = cvar::ConfigVars->find("content_root");
+                auto c = it == cvar::ConfigVars->end()
+                             ? nullptr
+                             : dynamic_cast<
+                                   cvar::ConfigVar<std::filesystem::path>*>(
+                                   it->second);
+                if (!c) return std::string();
+                return xe::path_to_utf8(
+                    c->GetTypedConfigValue().parent_path());
+              },
+              "Choose"));
+          storage.push_back(std::move(data));
+        }
+        g_xenon_active_page_state = &xenon_storage_state;
+        xs::Draw(xenon_storage_state, storage, display_scale,
+                 xe::ui::GetXenonDisplayFont());
 
+        if (show_path_warning_) {
+          ImGui::OpenPopup("Warning");
+          show_path_warning_ = false;
+          ImGui::SetNextWindowSize(
+              ImVec2(1200 * display_scale, 170 * display_scale));
+        }
+        if (ImGui::BeginPopupModal("Warning")) {
+          ImGui::TextWrapped(
+              "The folder you selected is not writable. Check that you have "
+              "the correct permissions for it.");
+          ImGui::Separator();
+          if (draw_text_button("##path_warning_ok_button", "OK") ||
+              ImGui::IsKeyPressed(ImGuiKey_GamepadFaceDown, false) ||
+              ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false)) {
+            ImGui::CloseCurrentPopup();
+          }
+          ImGui::EndPopup();
+        }
       }
 
       if (active_frontend_page_ == FrontendPage::kAbout) {
-        if (!ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId) &&
-            ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false)) {
-          about_focus_requested = true;
-        }
-
-        const float about_plane_margin = 12.0f * display_scale;
-        ImVec2 about_plane_origin = ImGui::GetCursorPos();
-        ImVec2 about_plane_avail = ImGui::GetContentRegionAvail();
-        ImVec2 about_plane_size(
-            std::max(0.0f, about_plane_avail.x - (about_plane_margin * 2.0f)),
-            std::max(0.0f, about_plane_avail.y - (about_plane_margin * 2.0f)));
-        ImGui::SetCursorPos(ImVec2(about_plane_origin.x + about_plane_margin,
-                                   about_plane_origin.y + about_plane_margin));
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-        if (ImGui::BeginChild("##about_editor_plane", about_plane_size, false)) {
-          XenonGamepadScroll();
-          if (about_focus_requested) {
-            ImGui::SetWindowFocus();
-          }
-          const float about_content_offset_x = 15.0f * display_scale;
-          ImGui::Indent(about_content_offset_x);
-
-          ImGui::TextWrapped(
-              "Xenia Canary UWP 1.1.7.1\n"
-              "A Unofficial fork of Xenia focusing on Xbox support and a blades "
-              "style frontend.\n");
-
-          ImGui::Spacing();
-
-          if (about_focus_requested) {
-            ImGui::SetKeyboardFocusHere();
-          }
-          if (draw_text_button("##xbox_port_donations_button",
-                               "Xbox Port Donations")) {
-            LaunchWebBrowser("https://ko-fi.com/danp142");
-          }
-          if (ImGui::IsItemFocused()) {
-            about_focus_requested = false;
-          }
-          ImGui::Spacing();
-          if (draw_text_button("##upstream_donations_button",
-                               "Upstream Donations")) {
-            LaunchWebBrowser("https://www.patreon.com/xenia_project");
-          }
-          ImGui::Spacing();
-          if (draw_text_button("##xbox_emulation_hub_button",
-                               "Xbox Emulation Hub")) {
-            LaunchWebBrowser("https://discord.gg/WCmxvvxHqu");
-          }
-          ImGui::Spacing();
-          if (draw_text_button("##emulation_revival_button",
-                               "Emulation Revival")) {
-            LaunchWebBrowser("https://discord.gg/Rr6vKuNjam");
-          }
-          ImGui::Spacing();
-          if (draw_text_button("##get_source_code_button",
-                               "Get the Source Code")) {
-            LaunchWebBrowser("https://github.com/danprice142/xenia-canary-uwp");
-          }
-
-          ImGui::Spacing();
-          static int dev_store_preview_index = -1;
-          const char* dev_store_options[] = {"XB Dev Store", "Revival Dev Store"};
-          const char* dev_store_urls[] = {
-              "https://xbdev.store/",
-              "https://emulationrevival.github.io/index.html",
-          };
-          const char* dev_store_preview =
-              dev_store_preview_index >= 0
-                  ? dev_store_options[dev_store_preview_index]
-                  : "Our App Stores";
-          ImGui::PushItemWidth(220.0f * display_scale);
-          {
-            ScopedAccentComboStyle accent_combo_style;
-            if (ImGui::BeginCombo("##app_stores_combo", dev_store_preview)) {
-              for (int i = 0; i < 2; ++i) {
-                bool selected = dev_store_preview_index == i;
-                if (ImGui::Selectable(dev_store_options[i], selected)) {
-                  dev_store_preview_index = i;
-                  LaunchWebBrowser(dev_store_urls[i]);
-                }
-                if (selected) {
-                  ImGui::SetItemDefaultFocus();
-                }
-              }
-              ImGui::EndCombo();
-            }
-          }
-          ImGui::PopItemWidth();
-          if (ImGui::IsItemFocused()) {
-            about_focus_requested = false;
-          }
-
-          ImGui::Spacing();
-          ImGui::TextWrapped(
-              "This UWP Xbox Port was originally made by SirMangler and the "
-              "hardwork of all the Xenia Project contributers over the years\n");
-
-          ImGui::EndChild();
-          ImGui::Unindent(about_content_offset_x);
-        }
-        ImGui::PopStyleVar();
-
+        // Xenon about screen.
+        namespace xs = xe::app::xenon_settings;
+        static xs::State xenon_about_state;
+        auto text = [](const char* value) {
+          return [value]() { return std::string(value); };
+        };
+        auto link = [this](const char* label, const char* url,
+                           const char* desc) {
+          xs::Option o = xs::Action(
+              label, [this, url]() { LaunchWebBrowser(url); }, desc, nullptr,
+              "Open");
+          return o;
+        };
+        std::vector<xs::Category> about;
+        about.push_back(
+            {"Xenia-Xenon",
+             {xs::Info("Version", text(kXenonVersion),
+                       "Xenia-Xenon: a Xenia Canary fork for Xbox Series X|S "
+                       "(Dev Mode, UWP, Direct3D 12)."),
+              xs::Info("Platform", text("Xbox Series X|S - D3D12")),
+              xs::Info("Based on", text("Xenia Canary UWP"),
+                       "Built on the Xenia Canary UWP port and the Xenia "
+                       "project.")}});
+        about.push_back(
+            {"Links",
+             {link("Xenia-Xenon on GitHub",
+                   "https://github.com/Dushe22/Xenia-Xenon",
+                   "Source code, releases and issue tracker for this fork."),
+              link("Original UWP port",
+                   "https://github.com/danprice142/xenia-canary-uwp",
+                   "Source of the Xenia Canary UWP port this fork is based on."),
+              link("Xbox port donations", "https://ko-fi.com/danp142",
+                   "Support the developer of the Xbox UWP port."),
+              link("Xenia project donations",
+                   "https://www.patreon.com/xenia_project",
+                   "Support the upstream Xenia project."),
+              link("Xbox Emulation Hub", "https://discord.gg/WCmxvvxHqu",
+                   "Community Discord for emulation on Xbox."),
+              link("Emulation Revival", "https://discord.gg/Rr6vKuNjam",
+                   "Emulation Revival community Discord."),
+              link("XB Dev Store", "https://xbdev.store/",
+                   "Homebrew app store for Xbox Dev Mode."),
+              link("Revival Dev Store",
+                   "https://emulationrevival.github.io/index.html",
+                   "Emulation Revival app store for Xbox Dev Mode.")}});
+        about.push_back(
+            {"Credits",
+             {xs::Info("Xenia project", text("Emulator core"),
+                       "Xenia and all of its contributors over the years."),
+              xs::Info("SirMangler", text("Original UWP port"),
+                       "Made the original UWP Xbox port of Xenia."),
+              xs::Info("danprice142", text("Canary UWP port"),
+                       "Maintains the Xenia Canary UWP port."),
+              xs::Info("Space Grotesk", text("Font (OFL)"),
+                       "Interface font by Florian Karsten, licensed under the "
+                       "SIL Open Font License.")}});
+        g_xenon_active_page_state = &xenon_about_state;
+        xs::Draw(xenon_about_state, about, display_scale,
+                 xe::ui::GetXenonDisplayFont());
       }
 
       }
@@ -6500,10 +6391,11 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
         draw_hint('A', "Play");
         draw_hint('X', "Game Menu");
         draw_hint('Y', "Search");
-      } else if (active_frontend_page_ == FrontendPage::kSettings) {
-        if (g_xenon_settings_on_right) {
-          draw_hint('A', "Change");
-          draw_hint('Y', "Reset");
+      } else if (g_xenon_active_page_state) {
+        const auto* xs_state = g_xenon_active_page_state;
+        if (xs_state->in_options) {
+          if (xs_state->hint_a) draw_hint('A', xs_state->hint_a);
+          if (xs_state->hint_y) draw_hint('Y', xs_state->hint_y);
           draw_hint('B', "Back to list");
         } else {
           draw_hint('A', "Open");
@@ -6512,7 +6404,9 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
         draw_hint('A', "Select");
         draw_hint('B', "Back");
       }
-      const char* version = "Xenia-Xenon v1.1.8.0";
+      const std::string version_text =
+          std::string("Xenia-Xenon v") + kXenonVersion;
+      const char* version = version_text.c_str();
       const float vf = 20.0f * s;
       frontend_draw_list->AddText(
           ui_font, vf,

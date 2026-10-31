@@ -16,6 +16,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -27,7 +28,7 @@ namespace xe {
 namespace app {
 namespace xenon_settings {
 
-enum class Kind { kToggle, kChoice, kRange, kText };
+enum class Kind { kToggle, kChoice, kRange, kText, kAction, kInfo };
 
 struct Choice {
   const char* value;
@@ -35,8 +36,8 @@ struct Choice {
 };
 
 struct Option {
-  const char* label;
-  const char* cvar;
+  std::string label;
+  const char* cvar = nullptr;
   Kind kind = Kind::kToggle;
   std::vector<Choice> choices;
   double min = 0.0, max = 1.0, step = 0.05;
@@ -44,10 +45,17 @@ struct Option {
   const char* cvar2 = nullptr;  // Optional second cvar set to the same value.
   const char* note = nullptr;   // Extra hint shown under the description.
   const char* zero_label = nullptr;  // Range: label to show for 0.
+  // Action / info rows (Storage, About).
+  std::function<void()> action;            // A
+  const char* action_label = nullptr;      // footer hint for A
+  std::function<void()> secondary;         // Y
+  const char* secondary_label = nullptr;   // footer hint for Y
+  std::function<std::string()> value_fn;   // text shown on the right
+  std::string desc;                        // overrides cvar description
 };
 
 struct Category {
-  const char* name;
+  std::string name;
   std::vector<Option> options;
 };
 
@@ -62,7 +70,34 @@ struct State {
   float row_y = -1.0f;
   float scroll = 0.0f;
   float pane_mix = 0.0f;  // 0 = list active, 1 = options active.
+  // Footer hints for the selected row (null = no hint).
+  const char* hint_a = nullptr;
+  const char* hint_y = nullptr;
 };
+
+inline Option Action(std::string label, std::function<void()> action,
+                     std::string desc,
+                     std::function<std::string()> value_fn = nullptr,
+                     const char* action_label = "Select") {
+  Option o;
+  o.label = std::move(label);
+  o.kind = Kind::kAction;
+  o.action = std::move(action);
+  o.action_label = action_label;
+  o.desc = std::move(desc);
+  o.value_fn = std::move(value_fn);
+  return o;
+}
+
+inline Option Info(std::string label, std::function<std::string()> value_fn,
+                   std::string desc = {}) {
+  Option o;
+  o.label = std::move(label);
+  o.kind = Kind::kInfo;
+  o.value_fn = std::move(value_fn);
+  o.desc = std::move(desc);
+  return o;
+}
 
 // ---- cvar access -----------------------------------------------------------
 
@@ -380,6 +415,9 @@ inline std::string ValueText(const Option& o) {
       const std::string s = GetString(v);
       return s.empty() ? "Not set" : s;
     }
+    case Kind::kAction:
+    case Kind::kInfo:
+      return o.value_fn ? o.value_fn() : std::string();
   }
   return {};
 }
@@ -415,6 +453,8 @@ inline void Change(const Option& o, int dir) {
       break;
     }
     case Kind::kText:
+    case Kind::kAction:
+    case Kind::kInfo:
       return;
   }
   Commit();
@@ -437,8 +477,15 @@ inline bool Pressed(ImGuiKey a, ImGuiKey b = ImGuiKey_None,
 
 // Draws the settings screen inside the current window and handles input.
 // Returns true while the options pane (right side) is active.
-inline bool Draw(State& st, float s, ImFont* display_font) {
-  const auto& cats = Categories();
+inline bool IsValueKind(const Option& o) {
+  return o.kind == Kind::kToggle || o.kind == Kind::kChoice ||
+         o.kind == Kind::kRange;
+}
+
+inline bool Draw(State& st, const std::vector<Category>& cats, float s,
+                 ImFont* display_font) {
+  st.hint_a = nullptr;
+  st.hint_y = nullptr;
   if (cats.empty()) return false;
   ImGuiIO& io = ImGui::GetIO();
   const float dt = std::min(io.DeltaTime, 0.1f);
@@ -498,12 +545,15 @@ inline bool Draw(State& st, float s, ImFont* display_font) {
         st.row = (st.row + opt_count - 1) % opt_count;
       } else if (down) {
         st.row = (st.row + 1) % opt_count;
-      } else if (left && o.kind != Kind::kText) {
+      } else if (left && IsValueKind(o)) {
         Change(o, -1);
-      } else if (right && o.kind != Kind::kText) {
+      } else if (right && IsValueKind(o)) {
         Change(o, +1);
       } else if (accept) {
-        if (o.kind == Kind::kText) {
+        if (o.kind == Kind::kAction) {
+          if (o.action) o.action();
+        } else if (o.kind == Kind::kInfo) {
+        } else if (o.kind == Kind::kText) {
           const std::string cur = GetString(Find(o.cvar));
           std::snprintf(st.text_buffer, sizeof(st.text_buffer), "%s",
                         cur.c_str());
@@ -513,7 +563,11 @@ inline bool Draw(State& st, float s, ImFont* display_font) {
           Change(o, +1);
         }
       } else if (reset) {
-        Reset(o);
+        if (o.secondary) {
+          o.secondary();
+        } else if (o.cvar) {
+          Reset(o);
+        }
       }
     }
   }
@@ -563,14 +617,15 @@ inline bool Draw(State& st, float s, ImFont* display_font) {
       const float f = 25.0f * s;
       const bool on = i == st.category;
       dl->AddText(font, f, ImVec2(list_x + 26.0f * s, y + (cat_h - f) * 0.5f),
-                  with_alpha(on ? kText : kDim, list_alpha), cats[i].name);
+                  with_alpha(on ? kText : kDim, list_alpha),
+                  cats[i].name.c_str());
     }
   }
 
   // Options pane.
   const float pane_alpha = 0.55f + 0.45f * st.pane_mix;
   dl->AddText(display_font, 40.0f * s, ImVec2(pane_x, top - 4.0f * s),
-              with_alpha(kText, pane_alpha), cat.name);
+              with_alpha(kText, pane_alpha), cat.name.c_str());
   {
     char count[32];
     std::snprintf(count, sizeof(count), "%d OPTIONS", opt_count);
@@ -580,7 +635,43 @@ inline bool Draw(State& st, float s, ImFont* display_font) {
                 count);
   }
 
-  const float desc_h = 104.0f * s;
+  // Description of the selected option, sized to fit its text.
+  std::string desc;
+  if (opt_count > 0) {
+    const Option& o = cat.options[st.row];
+    if (!o.desc.empty()) {
+      desc = o.desc;
+    } else if (auto v = Find(o.cvar)) {
+      desc = v->description();
+    }
+    if (o.note) desc = std::string(o.note) + (desc.empty() ? "" : "\n") + desc;
+    if (desc.empty()) desc = o.label;
+    // Footer hints for this row.
+    switch (o.kind) {
+      case Kind::kToggle: st.hint_a = "Toggle"; break;
+      case Kind::kChoice: st.hint_a = "Next"; break;
+      case Kind::kText: st.hint_a = "Edit"; break;
+      case Kind::kAction: st.hint_a = o.action_label; break;
+      default: break;
+    }
+    st.hint_y = o.secondary ? o.secondary_label : (o.cvar ? "Reset" : nullptr);
+  }
+  const float desc_pad = 18.0f * s;
+  const float desc_wrap = pane_w - desc_pad * 2.0f;
+  const float desc_max_h = std::max(90.0f * s, avail.y * 0.4f);
+  float desc_font = 21.0f * s;
+  float desc_text_h = 0.0f;
+  while (true) {
+    desc_text_h =
+        font->CalcTextSizeA(desc_font, FLT_MAX, desc_wrap, desc.c_str()).y;
+    if (desc_text_h + desc_pad * 2.0f <= desc_max_h || desc_font <= 15.0f * s)
+      break;
+    desc_font -= 1.0f * s;
+  }
+  const float desc_h = desc.empty()
+                           ? 0.0f
+                           : std::clamp(desc_text_h + desc_pad * 2.0f,
+                                        72.0f * s, desc_max_h);
   const float rows_top = top + 64.0f * s;
   const float rows_bottom = bottom - desc_h - 12.0f * s;
   const float row_h = 64.0f * s;
@@ -637,14 +728,17 @@ inline bool Draw(State& st, float s, ImFont* display_font) {
     if (ImGui::IsMouseHoveringRect(mn, mx) &&
         ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !st.editing_text) {
       st.in_options = true;
-      if (st.row == i && o.kind != Kind::kRange && o.kind != Kind::kText) {
+      if (st.row == i && o.kind == Kind::kAction && o.action) {
+        o.action();
+      } else if (st.row == i && o.kind != Kind::kRange &&
+                 o.kind != Kind::kText) {
         Change(o, +1);
       }
       st.row = i;
     }
     const float f = 24.0f * s;
     dl->AddText(font, f, ImVec2(mn.x + 24.0f * s, y + (row_h - f) * 0.5f),
-                with_alpha(kText, pane_alpha), o.label);
+                with_alpha(kText, pane_alpha), o.label.c_str());
 
     // Value widget on the right.
     const float vy = y + row_h * 0.5f;
@@ -700,6 +794,15 @@ inline bool Draw(State& st, float s, ImFont* display_font) {
       dl->AddTriangleFilled(ImVec2(ax0, vy - arrow * 0.5f),
                             ImVec2(ax0 - arrow * 0.6f, vy),
                             ImVec2(ax0, vy + arrow * 0.5f), ac);
+    } else if (o.kind == Kind::kAction || o.kind == Kind::kInfo) {
+      const std::string label = ValueText(o);
+      if (!label.empty()) {
+        const float lf = 21.0f * s;
+        const float lw =
+            font->CalcTextSizeA(lf, FLT_MAX, 0.0f, label.c_str()).x;
+        dl->AddText(font, lf, ImVec2(right_edge - lw, vy - lf * 0.5f),
+                    o.kind == Kind::kAction ? kText : kDim, label.c_str());
+      }
     } else if (o.kind == Kind::kText) {
       if (st.editing_text && selected) {
         ImGui::SetCursorScreenPos(
@@ -744,18 +847,14 @@ inline bool Draw(State& st, float s, ImFont* display_font) {
                       IM_COL32(150, 150, 255, 140), 2.0f * s);
   }
 
-  // Description of the selected option.
-  if (opt_count > 0) {
-    const Option& o = cat.options[st.row];
+  if (!desc.empty()) {
     const ImVec2 dmn(pane_x, bottom - desc_h), dmx(pane_x + pane_w, bottom);
     dl->AddRectFilled(dmn, dmx, IM_COL32(255, 255, 255, 10), 16.0f * s);
-    std::string desc;
-    if (auto v = Find(o.cvar)) desc = v->description();
-    if (o.note) desc = std::string(o.note) + (desc.empty() ? "" : "  ") + desc;
-    if (desc.empty()) desc = o.label;
-    const float f = 20.0f * s;
-    dl->AddText(font, f, ImVec2(dmn.x + 20.0f * s, dmn.y + 16.0f * s), kDim,
-                desc.c_str(), nullptr, pane_w - 40.0f * s);
+    dl->PushClipRect(dmn, dmx, true);
+    dl->AddText(font, desc_font,
+                ImVec2(dmn.x + desc_pad, dmn.y + desc_pad), kDim,
+                desc.c_str(), nullptr, desc_wrap);
+    dl->PopClipRect();
   }
 
   return st.in_options;
