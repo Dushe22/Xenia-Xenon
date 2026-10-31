@@ -431,7 +431,7 @@ inline std::string GetClockString() {
   localtime_r(&now, &time_info);
 #endif
   char buffer[16] = {};
-  if (std::strftime(buffer, sizeof(buffer), "%I:%M %p", &time_info) == 0) {
+  if (std::strftime(buffer, sizeof(buffer), "%H:%M", &time_info) == 0) {
     return "";
   }
   return buffer;
@@ -552,7 +552,11 @@ inline ImVec2 GetGuidePanelSize(
   return ImVec2(texture_aspect * display_height, display_height);
 }
 
-inline ImVec2 GetGuidePanelPadding() { return ImVec2(32.0f, 34.0f); }
+// Same margin for title, accent rule, text and buttons.
+inline ImVec2 GetGuidePanelPadding() {
+  const float s = ImGui::GetIO().DisplaySize.x / 1920.0f;
+  return ImVec2(48.0f * s, 34.0f * s);
+}
 
 inline void DrawGuidePanelBackground(
     ImDrawList* draw_list,
@@ -596,19 +600,23 @@ inline OverlayHeaderLayout DrawOverlayHeader(
     ImDrawList* draw_list, const ImVec2& overlay_min, const ImVec2& panel_size,
     const ImVec2& panel_padding, float ux, float uy, const char* title,
     bool draw_clock = true) {
-  OverlayHeaderLayout layout = {26.0f * uy,
-                                ImVec2(overlay_min.x + 30.0f * ux,
-                                       overlay_min.y + 18.0f * uy)};
+  // Sizes match the Xenon menus: 40px display-font titles, 24px body
+  // text, 30px clock (at 1080p).
+  const float s = ImGui::GetIO().DisplaySize.x / 1920.0f;
+  OverlayHeaderLayout layout = {40.0f * s,
+                                ImVec2(overlay_min.x + panel_padding.x,
+                                       overlay_min.y + 44.0f * s)};
   ImFont* header_font = ImGui::GetFont();
+  ImGui::SetWindowFontScale((24.0f * s) / header_font->FontSize);
   ImFont* title_font = xe::ui::GetXenonDisplayFont();
   if (!title_font) title_font = header_font;
-  const ImU32 header_color = IM_COL32(240, 243, 255, 255);
-  draw_list->AddText(title_font, layout.font_size * 1.15f, layout.position,
+  const ImU32 header_color = IM_COL32(238, 241, 255, 255);
+  draw_list->AddText(title_font, layout.font_size, layout.position,
                      header_color, title);
-  // Accent rule under the header.
-  const float rule_y = layout.position.y + layout.font_size * 1.15f + 14.0f * uy;
+  // Accent rule under the header, same width as the content.
+  const float rule_y = layout.position.y + layout.font_size + 16.0f * s;
   const float rule_x0 = layout.position.x;
-  const float rule_x1 = overlay_min.x + panel_size.x - 40.0f * ux;
+  const float rule_x1 = overlay_min.x + panel_size.x - panel_padding.x;
   draw_list->AddRectFilledMultiColor(
       ImVec2(rule_x0, rule_y), ImVec2(rule_x1, rule_y + 2.0f * uy),
       IM_COL32(150, 92, 255, 200), IM_COL32(56, 170, 255, 40),
@@ -623,14 +631,16 @@ inline OverlayHeaderLayout DrawOverlayHeader(
     return layout;
   }
 
+  const float clock_font = 30.0f * s;
   const ImVec2 clock_size = header_font->CalcTextSizeA(
-      layout.font_size, std::numeric_limits<float>::max(), 0.0f,
+      clock_font, std::numeric_limits<float>::max(), 0.0f,
       clock_text.c_str(), nullptr, nullptr);
-  const float clock_x = overlay_min.x + panel_size.x - panel_padding.x -
-                        clock_size.x - (40.0f * ux);
-  draw_list->AddText(header_font, layout.font_size * 0.8f,
-                     ImVec2(clock_x, layout.position.y + layout.font_size * 0.2f),
-                     IM_COL32(160, 168, 205, 255), clock_text.c_str());
+  const float clock_x =
+      overlay_min.x + panel_size.x - panel_padding.x - clock_size.x;
+  draw_list->AddText(
+      header_font, clock_font,
+      ImVec2(clock_x, layout.position.y + (layout.font_size - clock_font) * 0.5f),
+      header_color, clock_text.c_str());
   return layout;
 }
 

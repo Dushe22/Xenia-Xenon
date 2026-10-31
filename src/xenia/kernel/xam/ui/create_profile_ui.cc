@@ -106,7 +106,7 @@ void CreateProfileUI::OnDraw(ImGuiIO& io) {
 
     const float content_start_y =
         header_layout.position.y + header_layout.font_size + 55.0f;
-    const float field_width = 320.0f * ux;
+    const float field_width = panel_size.x - panel_padding.x * 2.0f;
     const float button_gap = ImGui::GetStyle().ItemSpacing.x;
 
     ImGui::SetCursorScreenPos(

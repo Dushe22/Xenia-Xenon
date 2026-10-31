@@ -101,7 +101,7 @@ void SigninUI::OnDraw(ImGuiIO& io) {
 
   const float content_start_y =
       header_layout.position.y + header_layout.font_size + 65.0f;
-  const float field_width = 320.0f * ux;
+  const float field_width = panel_size.x - panel_padding.x * 2.0f;
   ImGui::SetCursorScreenPos(
       ImVec2(overlay_min.x + panel_padding.x, content_start_y));
   ImGui::PushItemWidth(field_width);
