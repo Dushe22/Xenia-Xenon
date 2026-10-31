@@ -63,8 +63,8 @@ void NoProfileDialog::OnDraw(ImGuiIO& io) {
   }
 
   const std::string message =
-      "There is no profile available! You will not be able to save\n"
-      "without one.\n\nWould you like to create one?";
+      xe::ui::i18n::Tr("There is no profile available! You will not be able to save\n"
+      "without one.\n\nWould you like to create one?");
 
   const auto content_files = xe::filesystem::ListDirectories(
       emulator_window_->emulator()->content_root());
@@ -474,13 +474,13 @@ void ProfileConfigDialog::OnDraw(ImGuiIO& io) {
       ImGui::BeginGroup();
       {
         ImGui::TextUnformatted(
-            fmt::format("User: {}", account.GetGamertagString()).c_str());
+            fmt::format(fmt::runtime(xe::ui::i18n::Tr("User: {}")), account.GetGamertagString()).c_str());
         ImGui::TextUnformatted(fmt::format("XUID: {:016X}", xuid).c_str());
         if (user_index != XUserIndexAny) {
           ImGui::TextUnformatted(
-              fmt::format("Assigned to slot: {}", user_index + 1).c_str());
+              fmt::format(fmt::runtime(xe::ui::i18n::Tr("Assigned to slot: {}")), user_index + 1).c_str());
         } else {
-          ImGui::TextUnformatted("Profile is not signed in");
+          ImGui::TextUnformatted(xe::ui::i18n::Tr("Profile is not signed in"));
         }
       }
       ImGui::EndGroup();
@@ -509,7 +509,7 @@ void ProfileConfigDialog::OnDraw(ImGuiIO& io) {
       const bool is_signedin =
           profile_manager->GetProfile(selected_xuid_) != nullptr;
       if (selected_user_index == XUserIndexAny) {
-        if (ImGui::MenuItem("Login")) {
+        if (ImGui::MenuItem(xe::ui::i18n::Tr("Login"))) {
           XELOGD("ProfileConfigDialog: selected Login for {:016X}",
                  selected_xuid_);
           profile_manager->Login(selected_xuid_);
@@ -519,9 +519,9 @@ void ProfileConfigDialog::OnDraw(ImGuiIO& io) {
             LoadProfileIcon(selected_xuid_);
           }
         }
-        if (ImGui::BeginMenu("Login to slot:")) {
+        if (ImGui::BeginMenu(xe::ui::i18n::Tr("Login to slot:"))) {
           for (uint8_t i = 1; i <= XUserMaxUserCount; i++) {
-            if (ImGui::MenuItem(fmt::format("slot {}", i).c_str())) {
+            if (ImGui::MenuItem(fmt::format(fmt::runtime(xe::ui::i18n::Tr("slot {}")), i).c_str())) {
               XELOGD(
                   "ProfileConfigDialog: selected Login to slot {} for {:016X}",
                   i, selected_xuid_);
@@ -532,7 +532,7 @@ void ProfileConfigDialog::OnDraw(ImGuiIO& io) {
           ImGui::EndMenu();
         }
       } else {
-        if (ImGui::MenuItem("Logout")) {
+        if (ImGui::MenuItem(xe::ui::i18n::Tr("Logout"))) {
           XELOGD("ProfileConfigDialog: selected Logout for {:016X}",
                  selected_xuid_);
           profile_manager->Logout(selected_user_index);
@@ -540,7 +540,7 @@ void ProfileConfigDialog::OnDraw(ImGuiIO& io) {
         }
       }
 
-      if (ImGui::MenuItem("Modify")) {
+      if (ImGui::MenuItem(xe::ui::i18n::Tr("Modify"))) {
         XELOGD("ProfileConfigDialog: selected Modify for {:016X}",
                selected_xuid_);
         new kernel::xam::ui::GamercardUI(
@@ -549,7 +549,7 @@ void ProfileConfigDialog::OnDraw(ImGuiIO& io) {
       }
 
       ImGui::BeginDisabled(!is_signedin);
-      if (ImGui::MenuItem("Show Played Titles")) {
+      if (ImGui::MenuItem(xe::ui::i18n::Tr("Show Played Titles"))) {
         XELOGD("ProfileConfigDialog: selected Show Played Titles for {:016X}",
                selected_xuid_);
         if (imgui_drawer()->GetDialogCount() <= 1) {
@@ -566,18 +566,18 @@ void ProfileConfigDialog::OnDraw(ImGuiIO& io) {
 
       if (!emulator_window_->emulator()->is_title_open()) {
         ImGui::Separator();
-        if (ImGui::BeginMenu("Delete Profile")) {
+        if (ImGui::BeginMenu(xe::ui::i18n::Tr("Delete Profile"))) {
           ImGui::BeginTooltip();
           ImGui::TextUnformatted(
               fmt::format(
-                  "You're about to delete profile: {} (XUID: {:016X}). "
+                  fmt::runtime(xe::ui::i18n::Tr("You're about to delete profile: {} (XUID: {:016X}). "
                   "This will remove all data assigned to this profile "
-                  "including savefiles. Are you sure?",
+                  "including savefiles. Are you sure?")),
                   selected_it->second.GetGamertagString(), selected_xuid_)
                   .c_str());
           ImGui::EndTooltip();
 
-          if (ImGui::MenuItem("Yes, delete it!")) {
+          if (ImGui::MenuItem(xe::ui::i18n::Tr("Yes, delete it!"))) {
             XELOGD("ProfileConfigDialog: confirmed Delete Profile for {:016X}",
                    selected_xuid_);
             profile_manager->DeleteProfile(selected_xuid_);
@@ -816,11 +816,11 @@ void TitleListUI::OnDraw(ImGuiIO& io) {
           const auto time_date = std::chrono::system_clock::to_time_t(
               std::chrono::system_clock::time_point(
                   entry.last_played.time_since_epoch()));
-          ImGui::TextUnformatted(fmt::format("Last played: {:%Y-%m-%d %H:%M}",
+          ImGui::TextUnformatted(fmt::format(fmt::runtime(xe::ui::i18n::Tr("Last played: {:%Y-%m-%d %H:%M}")),
                                              *std::localtime(&time_date))
                                  .c_str());
         } else {
-          ImGui::TextUnformatted("Last played: Unknown");
+          ImGui::TextUnformatted(xe::ui::i18n::Tr("Last played: Unknown"));
         }
         ImGui::EndGroup();
         ImGui::Dummy(ImVec2(0.0f, carousel_spacing));
@@ -831,7 +831,7 @@ void TitleListUI::OnDraw(ImGuiIO& io) {
   } else {
     ImGui::SetCursorScreenPos(
         ImVec2(overlay_min.x + panel_padding.x, content_start_y));
-    std::string no_entries_message = "There are no titles, so far.";
+    std::string no_entries_message = xe::ui::i18n::Tr("There are no titles, so far.");
     ImGui::PushFont(imgui_drawer()->GetTitleFont());
     float windowWidth = ImGui::GetContentRegionAvail().x;
     ImVec2 textSize = ImGui::CalcTextSize(no_entries_message.c_str());

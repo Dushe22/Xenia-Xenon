@@ -488,6 +488,7 @@ Emulator::FileSignatureType GetFileSignature(
   constexpr int64_t header_size = 4;
 
   if (file_size < header_size) {
+    fclose(file);
     return Emulator::FileSignatureType::Unknown;
   }
 

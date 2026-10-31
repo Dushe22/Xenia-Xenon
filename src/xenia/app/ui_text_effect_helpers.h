@@ -13,6 +13,7 @@
 #include "third_party/stb/stb_image.h"
 #include "xenia/base/cvar.h"
 #include "xenia/ui/imgui_drawer.h"
+#include "xenia/ui/xenon_i18n.h"
 
 namespace xe {
 namespace app {
@@ -333,6 +334,7 @@ inline void DrawTextWithConfiguredEffect(ImDrawList* draw_list, ImFont* font,
 }
 
 inline void DrawConfiguredLabel(const char* text) {
+  text = xe::ui::i18n::Tr(text);
   ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
   ImGui::TextUnformatted(text);
   ImVec2 label_min = ImGui::GetItemRectMin();
@@ -369,6 +371,7 @@ inline bool DrawConfiguredInputText(const char* id, char* buffer,
 
 inline bool DrawTextEffectButton(const char* label,
                                  const ImVec2& size = ImVec2(0.0f, 0.0f)) {
+  label = xe::ui::i18n::Tr(label);
   ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
   bool pressed = ImGui::Button(label, size);
   ImVec2 button_min = ImGui::GetItemRectMin();
@@ -610,6 +613,7 @@ inline OverlayHeaderLayout DrawOverlayHeader(
     ImDrawList* draw_list, const ImVec2& overlay_min, const ImVec2& panel_size,
     const ImVec2& panel_padding, float /*ux*/, float /*uy*/, const char* title,
     bool draw_clock = true) {
+  title = xe::ui::i18n::Tr(title);
   // Sizes match the Xenon menus: 40px display-font titles, 24px body
   // text, 30px clock (at 1080p).
   const float s = ImGui::GetIO().DisplaySize.x / 1920.0f;
@@ -660,6 +664,7 @@ inline void DrawFooterPrompt(ImDrawList* draw_list,
                              float text_size, float icon_size,
                              const char* text, float text_y, float text_x,
                              float icon_offset) {
+  text = xe::ui::i18n::Tr(text);
   const FooterAnchor& anchor = GetFooterAnchor();
   if (anchor.frame == ImGui::GetFrameCount()) {
     // Xenon layout: icon flush with the content's right margin, text to its

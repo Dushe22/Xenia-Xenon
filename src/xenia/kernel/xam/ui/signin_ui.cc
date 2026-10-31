@@ -247,7 +247,7 @@ void SigninUI::OnDraw(ImGuiIO& io) {
   ImGui::SetCursorScreenPos(
       ImVec2(overlay_min.x + panel_padding.x,
              ImGui::GetCursorScreenPos().y));
-  if (xe::app::DrawTextEffectButton("Create Profile", create_button_size)) {
+  if (xe::app::DrawTextEffectButton(xe::ui::i18n::Tr("Create Profile"), create_button_size)) {
     creating_profile_ = true;
     creating_profile_focus_requested_ = true;
 #if XE_PLATFORM_WINRT
@@ -286,7 +286,7 @@ void SigninUI::OnDraw(ImGuiIO& io) {
   ImGui::EndDisabled();
   ImGui::SameLine(0.0f, button_gap);
 
-  if (xe::app::DrawTextEffectButton("Cancel", ok_cancel_button_size)) {
+  if (xe::app::DrawTextEffectButton(xe::ui::i18n::Tr("Cancel"), ok_cancel_button_size)) {
     pending_login_profiles_.clear();
     ImGui::CloseCurrentPopup();
     Close();
@@ -346,7 +346,7 @@ void SigninUI::OnDraw(ImGuiIO& io) {
 
     const xe::app::OverlayHeaderLayout create_header_layout =
         xe::app::DrawOverlayHeader(create_draw_list, create_min, panel_size,
-                                   panel_padding, ux, uy, "Create Profile");
+                                   panel_padding, ux, uy, xe::ui::i18n::Tr("Create Profile"));
 
     const float create_content_start_y =
         create_header_layout.position.y + create_header_layout.font_size +
@@ -361,7 +361,7 @@ void SigninUI::OnDraw(ImGuiIO& io) {
     auto profile_manager =
         kernel_state()->xam_state()->profile_manager();
 
-    xe::app::DrawConfiguredLabel("Gamertag:");
+    xe::app::DrawConfiguredLabel(xe::ui::i18n::Tr("Gamertag:"));
     if (creating_profile_focus_requested_) {
       ImGui::SetKeyboardFocusHere();
       creating_profile_focus_requested_ = false;
@@ -387,7 +387,7 @@ void SigninUI::OnDraw(ImGuiIO& io) {
         ImVec2(create_content_x,
                ImGui::GetCursorScreenPos().y + (10.0f * uy)));
     ImGui::BeginDisabled(!valid);
-    if (xe::app::DrawTextEffectButton("Create", create_button_size)) {
+    if (xe::app::DrawTextEffectButton(xe::ui::i18n::Tr("Create"), create_button_size)) {
       profile_manager->CreateProfile(gamertag_string, false);
       std::fill(std::begin(gamertag_), std::end(gamertag_), '\0');
       creating_profile_ = false;
@@ -398,7 +398,7 @@ void SigninUI::OnDraw(ImGuiIO& io) {
     ImGui::EndDisabled();
     ImGui::SameLine(0.0f, create_button_gap);
 
-    if (xe::app::DrawTextEffectButton("Cancel", create_button_size)) {
+    if (xe::app::DrawTextEffectButton(xe::ui::i18n::Tr("Cancel"), create_button_size)) {
       std::fill(std::begin(gamertag_), std::end(gamertag_), '\0');
       creating_profile_ = false;
       creating_profile_focus_requested_ = false;
@@ -567,7 +567,7 @@ void SigninUI::OnDraw(ImGuiIO& io) {
 
   ImGui::Spacing();
 
-  if (ImGui::Button("Create Profile")) {
+  if (ImGui::Button(xe::ui::i18n::Tr("Create Profile"))) {
     creating_profile_ = true;
     creating_profile_focus_requested_ = true;
     ImGui::OpenPopup(kCreateProfilePopupName);
@@ -602,7 +602,7 @@ void SigninUI::OnDraw(ImGuiIO& io) {
   ImGui::EndDisabled();
   ImGui::SameLine();
 
-  if (ImGui::Button("Cancel")) {
+  if (ImGui::Button(xe::ui::i18n::Tr("Cancel"))) {
     pending_login_profiles_.clear();
     ImGui::CloseCurrentPopup();
     Close();
@@ -622,7 +622,7 @@ void SigninUI::OnDraw(ImGuiIO& io) {
     } else {
       auto profile_manager = kernel_state()->xam_state()->profile_manager();
 
-      ImGui::TextUnformatted("Gamertag:");
+      ImGui::TextUnformatted(xe::ui::i18n::Tr("Gamertag:"));
       if (creating_profile_focus_requested_) {
         ImGui::SetKeyboardFocusHere();
         creating_profile_focus_requested_ = false;
@@ -633,7 +633,7 @@ void SigninUI::OnDraw(ImGuiIO& io) {
       bool valid = profile_manager->IsGamertagValid(gamertag_string);
 
       ImGui::BeginDisabled(!valid);
-      if (ImGui::Button("Create")) {
+      if (ImGui::Button(xe::ui::i18n::Tr("Create"))) {
         profile_manager->CreateProfile(gamertag_string, false);
         std::fill(std::begin(gamertag_), std::end(gamertag_), '\0');
         creating_profile_ = false;
@@ -647,7 +647,7 @@ void SigninUI::OnDraw(ImGuiIO& io) {
         ImGui::EndDisabled();
         ImGui::SameLine();
 
-        if (ImGui::Button("Cancel")) {
+        if (ImGui::Button(xe::ui::i18n::Tr("Cancel"))) {
           std::fill(std::begin(gamertag_), std::end(gamertag_), '\0');
           creating_profile_ = false;
           creating_profile_focus_requested_ = false;

@@ -277,6 +277,30 @@ void UWP::UpdateImGuiIO() {
   io.AddKeyAnalogEvent(ImGuiKey_GamepadR2, rt > kTriggerDeadzone, rt);
 }
 
+// STFS packages also carry DLC, themes, avatar items and other content.
+// Only list packages whose content type is something that can be launched.
+static bool IsLaunchableStfsPackage(const std::filesystem::path& path) {
+  std::ifstream in(path, std::ios::binary);
+  uint8_t raw[4] = {};
+  in.seekg(0x344);
+  if (!in.read(reinterpret_cast<char*>(raw), sizeof(raw))) {
+    return false;
+  }
+  const uint32_t content_type = (uint32_t(raw[0]) << 24) |
+                                (uint32_t(raw[1]) << 16) |
+                                (uint32_t(raw[2]) << 8) | uint32_t(raw[3]);
+  switch (content_type) {
+    case 0x00007000:  // Xbox 360 title (Games on Demand)
+    case 0x000D0000:  // Arcade title
+    case 0x00005000:  // Original Xbox title
+    case 0x00080000:  // Game demo
+    case 0x02000000:  // Community game
+      return true;
+    default:
+      return false;
+  }
+}
+
 void RecurseFolderForGames(std::string path) {
   try {
     const std::string normalized_directory = NormalizeScannedPath(path);
@@ -298,7 +322,8 @@ void RecurseFolderForGames(std::string path) {
 
       if (!file.is_regular_file()) continue;
 
-      switch (xe::GetFileSignature(file.path())) {
+      const auto signature = xe::GetFileSignature(file.path());
+      switch (signature) {
         case xe::Emulator::FileSignatureType::XEX1:
         case xe::Emulator::FileSignatureType::XEX2: {
           const bool is_default_xex =
@@ -320,6 +345,10 @@ void RecurseFolderForGames(std::string path) {
         case xe::Emulator::FileSignatureType::CON:
         case xe::Emulator::FileSignatureType::PIRS:
         case xe::Emulator::FileSignatureType::ZAR: {
+          if (signature != xe::Emulator::FileSignatureType::ZAR &&
+              !IsLaunchableStfsPackage(file.path())) {
+            break;
+          }
           std::string filename = file.path().stem().string();
 
           AddGameEntry(file.path(), filename);
@@ -327,6 +356,9 @@ void RecurseFolderForGames(std::string path) {
         }
 
         case xe::Emulator::FileSignatureType::LIVE: {
+          if (!IsLaunchableStfsPackage(file.path())) {
+            break;
+          }
           std::ifstream in(file.path().string(), std::ios::binary);
 
           in.seekg(0x412);
@@ -343,6 +375,7 @@ void RecurseFolderForGames(std::string path) {
           AddGameEntry(file.path(), data);
 
           in.close();
+          break;
         }
         default:
           continue;

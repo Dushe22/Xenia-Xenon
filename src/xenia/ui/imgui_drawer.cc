@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <cmath>
 #include <cstring>
+#include <list>
 #include <ranges>
 #include <vector>
 
@@ -27,6 +28,7 @@
 #include "xenia/ui/resources.h"
 #include "xenia/ui/ui_event.h"
 #include "xenia/ui/window.h"
+#include "xenia/ui/xenon_i18n.h"
 #include <xenia/hid/input.h>
 #include "xenia/config.h"
 
@@ -79,6 +81,7 @@ namespace ui {
 constexpr char kXenonFontPath[] = "Assets/fonts/SpaceGrotesk-Medium.ttf";
 constexpr char kXenonDisplayFontPath[] = "Assets/fonts/SpaceGrotesk-Bold.ttf";
 static ImFont* g_xenon_display_font = nullptr;
+static void MergeLanguageFonts(ImGuiIO& io, float font_size, bool bold);
 
 // File: 'ProggyTiny.ttf' (35656 bytes)
 // Exported using binary_to_compressed_c.cpp
@@ -454,6 +457,7 @@ void ImGuiDrawer::Initialize() {
     g_xenon_display_font = io.Fonts->AddFontFromFileTTF(
         kXenonDisplayFontPath, 72.0f, &display_config,
         io.Fonts->GetGlyphRangesDefault());
+    MergeLanguageFonts(io, 72.0f, true);
   }
 
 #ifdef XE_PLATFORM_LINUX
@@ -642,6 +646,39 @@ static constexpr ImWchar font_glyph_ranges[] = {
 // Xenon brand font, shipped in the app package (relative to install folder).
 
 ImFont* GetXenonDisplayFont() { return g_xenon_display_font; }
+
+// Merges Noto glyphs for languages Space Grotesk doesn't cover. Only the
+// current language gets its full text; the others just need their own name
+// for the language picker.
+static void MergeLanguageFonts(ImGuiIO& io, float font_size, bool bold) {
+  // Glyph ranges must outlive the atlas build.
+  static std::list<ImVector<ImWchar>> ranges_storage;
+  const i18n::Language current = i18n::CurrentLanguage();
+  for (int i = 0; i < int(i18n::Language::kCount); ++i) {
+    const auto language = i18n::Language(i);
+    const char* path = i18n::FontFile(language, bold);
+    if (!path || !std::filesystem::exists(path)) {
+      continue;
+    }
+    if (bold && language != current) {
+      continue;
+    }
+    const std::string text = language == current
+                                 ? i18n::GlyphText(language)
+                                 : i18n::NativeName(language);
+    ImFontGlyphRangesBuilder builder;
+    builder.AddText(text.c_str());
+    auto& ranges = ranges_storage.emplace_back();
+    builder.BuildRanges(&ranges);
+
+    ImFontConfig config;
+    config.MergeMode = true;
+    // Large CJK sets would make a huge atlas at display size.
+    config.OversampleH = config.OversampleV = bold ? 1 : 2;
+    config.PixelSnapH = true;
+    io.Fonts->AddFontFromFileTTF(path, font_size, &config, ranges.Data);
+  }
+}
 
 bool ImGuiDrawer::LoadCustomFont(ImGuiIO& io, ImFontConfig& font_config,
                                  float font_size) {
@@ -850,6 +887,9 @@ void ImGuiDrawer::InitializeFonts(const float font_size) {
   font_config.PixelSnapH = true;
 
   bool is_font_loaded = LoadCustomFont(io, font_config, font_size);
+  if (is_font_loaded) {
+    MergeLanguageFonts(io, font_size, false);
+  }
   if (!is_font_loaded) {
     is_font_loaded = LoadWindowsFont(io, font_config, font_size);
   }

@@ -26,10 +26,13 @@
 #include "xenia/config.h"
 #include "xenia/kernel/kernel_state.h"
 #include "xenia/kernel/xconfig.h"
+#include "xenia/ui/xenon_i18n.h"
 
 namespace xe {
 namespace app {
 namespace xenon_settings {
+
+using ui::i18n::Tr;
 
 enum class Kind { kToggle, kChoice, kRange, kText, kAction, kInfo };
 
@@ -232,7 +235,9 @@ inline Option ConsoleLanguage() {
                {"14", "Turkish"},    {"15", "Norwegian"},
                {"16", "Dutch"},      {"17", "Simplified Chinese"}};
   o.default_value = "1";
-  o.desc = "Language reported to games.";
+  o.desc =
+      "Language the emulated console reports to games. Games without that "
+      "language fall back to English.";
   o.get = []() -> std::string {
     auto kernel_state = kernel::KernelState::shared();
     if (!kernel_state || !kernel_state->xconfig()) return {};
@@ -257,7 +262,19 @@ inline const std::vector<Category>& Categories() {
     c.push_back({"General",
                  {Toggle("Apply patches", "apply_patches"),
                   Toggle("Controller hotkeys", "controller_hotkeys"),
-                  ConsoleLanguage()}});
+                  ConsoleLanguage(),
+                  Pick("Emulator language", "ui_language",
+                       {{"auto", "Automatic"},
+                        {"en", "English"},
+                        {"es", "Español"},
+                        {"pt", "Português"},
+                        {"fr", "Français"},
+                        {"de", "Deutsch"},
+                        {"it", "Italiano"},
+                        {"ja", "日本語"},
+                        {"ko", "한국어"},
+                        {"zh", "简体中文"},
+                        {"ru", "Русский"}})}});
     c.push_back(
         {"Graphics",
          {Range("Resolution scale", "draw_resolution_scale_x", 1, 3, 1,
@@ -429,9 +446,9 @@ inline const std::vector<Category>& Categories() {
         {"controller_hotkeys",
          "Enables emulator shortcuts on the controller while a game is "
          "running."},
-        {"user_language",
-         "Language the emulated console reports to games. Games without that "
-         "language fall back to English."},
+        {"ui_language",
+         "Language of the Xenon menus. Automatic follows the console's "
+         "language. Restart Xenon to finish applying it."},
         {"draw_resolution_scale_x",
          "Renders games at a multiple of their original resolution (sets width "
          "and height together). Higher looks sharper but needs much more GPU; "
@@ -660,27 +677,29 @@ inline std::string ValueText(const Option& o) {
     case Kind::kToggle: {
       double n = 0;
       GetNumber(v, &n);
-      return n != 0.0 ? "On" : "Off";
+      return Tr(n != 0.0 ? "On" : "Off");
     }
     case Kind::kChoice: {
       const int i = ChoiceIndex(o);
-      return i >= 0 ? o.choices[i].label : o.get ? o.get() : GetString(v);
+      return i >= 0 ? Tr(o.choices[i].label) : o.get ? o.get() : GetString(v);
     }
     case Kind::kRange: {
       double n = 0;
       GetNumber(v, &n);
-      if (o.zero_label && n == 0.0) return o.zero_label;
+      if (o.zero_label && n == 0.0) return Tr(o.zero_label);
       char buf[48];
       std::snprintf(buf, sizeof(buf), o.format, n);
       return buf;
     }
     case Kind::kText: {
       const std::string s = GetString(v);
-      return s.empty() ? "Not set" : s;
+      return s.empty() ? Tr("Not set") : s;
     }
     case Kind::kAction:
     case Kind::kInfo:
-      return o.value_fn ? o.value_fn() : std::string();
+      if (!o.value_fn) return {};
+      const std::string value = o.value_fn();
+      return Tr(value.c_str());
   }
   return {};
 }
@@ -899,17 +918,17 @@ inline bool Draw(State& st, const std::vector<Category>& cats, float s,
       const bool on = i == st.category;
       dl->AddText(font, f, ImVec2(list_x + 26.0f * s, y + (cat_h - f) * 0.5f),
                   with_alpha(on ? kText : kDim, list_alpha),
-                  cats[i].name.c_str());
+                  Tr(cats[i].name.c_str()));
     }
   }
 
   // Options pane.
   const float pane_alpha = 0.55f + 0.45f * st.pane_mix;
   dl->AddText(display_font, 40.0f * s, ImVec2(pane_x, top - 4.0f * s),
-              with_alpha(kText, pane_alpha), cat.name.c_str());
+              with_alpha(kText, pane_alpha), Tr(cat.name.c_str()));
   {
     char count[32];
-    std::snprintf(count, sizeof(count), "%d OPTIONS", opt_count);
+    std::snprintf(count, sizeof(count), Tr("%d OPTIONS"), opt_count);
     const float f = 17.0f * s;
     const float w = font->CalcTextSizeA(f, FLT_MAX, 0.0f, count).x;
     dl->AddText(font, f, ImVec2(pane_x + pane_w - w, top + 14.0f * s), kFaint,
@@ -921,30 +940,33 @@ inline bool Draw(State& st, const std::vector<Category>& cats, float s,
   if (opt_count > 0) {
     const Option& o = cat.options[st.row];
     if (!o.desc.empty()) {
-      desc = o.desc;
+      desc = Tr(o.desc.c_str());
     } else if (auto v = Find(o.cvar)) {
       desc = v->description();
     }
-    if (o.note) desc = std::string(o.note) + (desc.empty() ? "" : "\n") + desc;
-    if (desc.empty()) desc = o.label;
+    if (o.note) {
+      desc = std::string(Tr(o.note)) + (desc.empty() ? "" : "\n") + desc;
+    }
+    if (desc.empty()) desc = Tr(o.label.c_str());
     // Footer hints for this row.
     switch (o.kind) {
       case Kind::kToggle:
-        st.hint_a = "Toggle";
+        st.hint_a = Tr("Toggle");
         break;
       case Kind::kChoice:
-        st.hint_a = "Next";
+        st.hint_a = Tr("Next");
         break;
       case Kind::kText:
-        st.hint_a = "Edit";
+        st.hint_a = Tr("Edit");
         break;
       case Kind::kAction:
-        st.hint_a = o.action_label;
+        st.hint_a = Tr(o.action_label);
         break;
       default:
         break;
     }
-    st.hint_y = o.secondary ? o.secondary_label : (o.cvar ? "Reset" : nullptr);
+    st.hint_y = o.secondary ? Tr(o.secondary_label)
+                            : (o.cvar ? Tr("Reset") : nullptr);
   }
   const float desc_pad = 18.0f * s;
   const float desc_wrap = pane_w - desc_pad * 2.0f;
@@ -1027,7 +1049,7 @@ inline bool Draw(State& st, const std::vector<Category>& cats, float s,
     }
     const float f = 24.0f * s;
     dl->AddText(font, f, ImVec2(mn.x + 24.0f * s, y + (row_h - f) * 0.5f),
-                with_alpha(kText, pane_alpha), o.label.c_str());
+                with_alpha(kText, pane_alpha), Tr(o.label.c_str()));
 
     // Value widget on the right.
     const float vy = y + row_h * 0.5f;

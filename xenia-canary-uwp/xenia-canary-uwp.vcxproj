@@ -283,6 +283,33 @@
     <None Include="Assets\fonts\SpaceGrotesk-Bold.ttf">
       <DeploymentContent>true</DeploymentContent>
     </None>
+    <None Include="Assets\fonts\NotoSans-Medium.ttf">
+      <DeploymentContent>true</DeploymentContent>
+    </None>
+    <None Include="Assets\fonts\NotoSans-Bold.ttf">
+      <DeploymentContent>true</DeploymentContent>
+    </None>
+    <None Include="Assets\fonts\NotoSansJP-Medium.ttf">
+      <DeploymentContent>true</DeploymentContent>
+    </None>
+    <None Include="Assets\fonts\NotoSansJP-Bold.ttf">
+      <DeploymentContent>true</DeploymentContent>
+    </None>
+    <None Include="Assets\fonts\NotoSansKR-Medium.ttf">
+      <DeploymentContent>true</DeploymentContent>
+    </None>
+    <None Include="Assets\fonts\NotoSansKR-Bold.ttf">
+      <DeploymentContent>true</DeploymentContent>
+    </None>
+    <None Include="Assets\fonts\NotoSansSC-Medium.ttf">
+      <DeploymentContent>true</DeploymentContent>
+    </None>
+    <None Include="Assets\fonts\NotoSansSC-Bold.ttf">
+      <DeploymentContent>true</DeploymentContent>
+    </None>
+    <None Include="Assets\fonts\NotoSans-OFL.txt">
+      <DeploymentContent>true</DeploymentContent>
+    </None>
     <Image Include="Assets\A.png" />
     <Image Include="Assets\B.png" />
     <Image Include="Assets\X.png" />

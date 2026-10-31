@@ -28,6 +28,10 @@
 #include "UWPUtil.h"
 #include "WinRTKeyboard.h"
 
+#include "third_party/fmt/include/fmt/format.h"
+#include "xenia/base/string.h"
+#include "xenia/ui/xenon_i18n.h"
+
 using namespace winrt;
 
 using namespace Windows;
@@ -123,16 +127,22 @@ struct App : implements<App, IFrameworkViewSource, IFrameworkView>
     static constexpr uint64_t kMinMemoryLimit = 3ull * 1024 * 1024 * 1024;
 
     void ShowGameModeNotice(uint64_t memory_limit) {
-      std::wstring text =
-          L"Xenia Xenon is running as an App, which only gets " +
-          std::to_wstring(memory_limit / (1024 * 1024)) +
-          L" MB of memory. The emulator needs Game mode.\n\n"
-          L"In Dev Home, highlight Xenia Xenon, press the View button, "
-          L"choose View details and set App type to Game. Then open it "
-          L"again.";
+      using xe::ui::i18n::Tr;
+      const std::string text = fmt::format(
+          fmt::runtime(
+              Tr("Xenia Xenon is running as an App, which only gets {} MB of "
+                 "memory. The emulator needs Game mode.\n\nIn Dev Home, "
+                 "highlight Xenia Xenon, press the View button, choose View "
+                 "details and set App type to Game. Then open it again.")),
+          memory_limit / (1024 * 1024));
+      const auto wide = [](const char* s) {
+        const std::u16string u16 = xe::to_utf16(s);
+        return winrt::hstring(reinterpret_cast<const wchar_t*>(u16.c_str()));
+      };
       winrt::Windows::UI::Popups::MessageDialog dialog(
-          winrt::hstring(text), L"Switch Xenia Xenon to Game mode");
-      dialog.Commands().Append(winrt::Windows::UI::Popups::UICommand(L"Close"));
+          wide(text.c_str()), wide(Tr("Switch Xenia Xenon to Game mode")));
+      dialog.Commands().Append(
+          winrt::Windows::UI::Popups::UICommand(wide(Tr("Close"))));
       dialog.ShowAsync().Completed(
           [](auto const&, auto) { CoreApplication::Exit(); });
       CoreWindow::GetForCurrentThread().Dispatcher().ProcessEvents(

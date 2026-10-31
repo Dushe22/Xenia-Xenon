@@ -263,7 +263,7 @@ namespace app {
 
 // Lets the right stick scroll the current window (frontend pages).
 static xe::app::xenon_settings::State* g_xenon_active_page_state = nullptr;
-static constexpr char kXenonVersion[] = "1.2.0.1";
+static constexpr char kXenonVersion[] = "1.2.1.0";
 static bool g_xenon_pergame_on_right = false;
 
 static void XenonGamepadScroll() {
@@ -282,6 +282,7 @@ static void XenonGamepadScroll() {
 }
 
 using xe::ui::FileDropEvent;
+using xe::ui::i18n::Tr;
 using xe::ui::KeyEvent;
 #if !XE_PLATFORM_WINRT
 using xe::ui::MenuItem;
@@ -1881,7 +1882,7 @@ EmulatorWindow::ControllerHotKey EmulatorWindow::ProcessControllerHotkey(
     // Must clear dialogs to prevent stacking
     imgui_drawer_.get()->ClearDialogs();
 
-    // Titles may contain Unicode characters such as At World’s End
+    // Titles may contain Unicode characters such as At World's End
     // Must use ImGUI font that can render these Unicode characters
     std::string title_name;
 
@@ -2460,13 +2461,13 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
       y += 150.0f * s;
       {
         float x = left;
-        char ch[2] = {0, 0};
-        for (const char* p = "WELCOME TO"; *p; ++p) {
-          ch[0] = *p;
+        for (const char* p = Tr("WELCOME TO"); *p;) {
+          const char* next = p + ui::i18n::Utf8Length(p);
           dl->AddText(ui_font, 22.0f * s, ImVec2(x, y), A(170, 178, 220, 255),
-                      ch, ch + 1);
-          x += ui_font->CalcTextSizeA(22.0f * s, FLT_MAX, 0.0f, ch, ch + 1).x +
+                      p, next);
+          x += ui_font->CalcTextSizeA(22.0f * s, FLT_MAX, 0.0f, p, next).x +
                6.0f * s;
+          p = next;
         }
       }
       y += 40.0f * s;
@@ -2474,7 +2475,7 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
                   A(240, 243, 255, 255), "Xenia-Xenon");
       y += 124.0f * s;
       dl->AddText(ui_font, 30.0f * s, ImVec2(left, y), A(180, 188, 225, 255),
-                  "Xbox 360 emulation, built for Xbox Series X|S.");
+                  Tr("Xbox 360 emulation, built for Xbox Series X|S."));
       y += 90.0f * s;
 
       // Feature cards.
@@ -2505,9 +2506,9 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
                           ImVec2(cx + 34.0f * s, cy + 58.0f * s),
                           A(122, 120, 255, 255), 4.0f * s);
         dl->AddText(ui_font, 27.0f * s, ImVec2(cx + 48.0f * s, cy + 28.0f * s),
-                    A(240, 243, 255, 255), cards[i].title);
+                    A(240, 243, 255, 255), Tr(cards[i].title));
         dl->AddText(ui_font, 21.0f * s, ImVec2(cx + 26.0f * s, cy + 74.0f * s),
-                    A(170, 178, 220, 255), cards[i].body, nullptr,
+                    A(170, 178, 220, 255), Tr(cards[i].body), nullptr,
                     card_w - 52.0f * s);
       }
       y += card_h + 70.0f * s;
@@ -2515,7 +2516,7 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
       // Start playing button.
       bool start = false;
       {
-        const char* label = "Start playing";
+        const char* label = Tr("Start playing");
         const float h = 78.0f * s, f = 32.0f * s, icon = 40.0f * s;
         const float w = ui_font->CalcTextSizeA(f, FLT_MAX, 0.0f, label).x +
                         icon + 100.0f * s;
@@ -2556,7 +2557,7 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
                        ImVec2(0, 0), ImVec2(1, 1), A(255, 255, 255, 255));
           dl->AddText(ui_font, 23.0f * s,
                       ImVec2(hx + 46.0f * s, y + (h - 23.0f * s) * 0.5f),
-                      A(170, 178, 220, 255), "Don't show this again");
+                      A(170, 178, 220, 255), Tr("Don't show this again"));
         }
       }
       ImGui::End();
@@ -2994,7 +2995,7 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
             std::error_code ec;
             std::filesystem::create_directories(title_plugin_root, ec);
             if (ec) {
-              return set_error("Could not create plugin install directory.");
+              return set_error(Tr("Could not create plugin install directory."));
             }
 
             const auto plugins_toml_path = title_plugin_root / "plugins.toml";
@@ -3067,7 +3068,7 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
                     std::filesystem::copy_options::overwrite_existing, ec);
                 if (ec) {
                   return set_error(
-                      "Downloaded plugin config could not be written as plugins.toml.");
+                      Tr("Downloaded plugin config could not be written as plugins.toml."));
                 }
                 ec.clear();
                 std::filesystem::remove(first_toml_path, ec);
@@ -3077,12 +3078,12 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
 
             if (plugin_xex_files.empty()) {
               return set_error(
-                  "Downloaded plugin files are missing plugin .xex payloads.");
+                  Tr("Downloaded plugin files are missing plugin .xex payloads."));
             }
 
             if (inferred_hashes.empty()) {
               return set_error(
-                  "Downloaded plugin files did not include a plugins.toml and no 16-digit module hash could be inferred from filenames.");
+                  Tr("Downloaded plugin files did not include a plugins.toml and no 16-digit module hash could be inferred from filenames."));
             }
 
             std::vector<std::string> hashes(inferred_hashes.begin(),
@@ -3090,7 +3091,7 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
 
             std::ofstream toml_file(plugins_toml_path, std::ios::binary);
             if (!toml_file.is_open()) {
-              return set_error("Failed to create plugins.toml.");
+              return set_error(Tr("Failed to create plugins.toml."));
             }
 
             const std::string normalized_title_name =
@@ -3219,10 +3220,10 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
                     bool enabled = EnablePatchesForTitle(patches_root, title_id);
                     action_status_ = enabled
                                           ? fmt::format(
-                                                "Downloaded and applied patches for {}.",
+                                                fmt::runtime(Tr("Downloaded and applied patches for {}.")),
                                                 title_id)
                                           : fmt::format(
-                                                "Downloaded patches for {}, but enabling failed.",
+                                                fmt::runtime(Tr("Downloaded patches for {}, but enabling failed.")),
                                                 title_id);
                     action_popup_mode_ = ActionPopupMode::kInfo;
                     pending_manual_kind_ = ManualInstallKind::kPatch;
@@ -3233,8 +3234,8 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
                   } else {
                     open_manual_prompt(
                         patches_root, ManualInstallKind::kPatch, title_id,
-                        "No matching patches were found online.\n"
-                        "Do you want to select a patch file manually?");
+                        Tr("No matching patches were found online.\n"
+                        "Do you want to select a patch file manually?"));
                   }
                 });
           };
@@ -3254,18 +3255,18 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
                     if (msg == "already_installed") {
                       action_status_ = applied
                                            ? fmt::format(
-                                                 "Optimized settings already installed and re-applied for {}.",
+                                                 fmt::runtime(Tr("Optimized settings already installed and re-applied for {}.")),
                                                  title_id)
                                            : fmt::format(
-                                                 "Optimized settings already installed for {}, but apply failed.",
+                                                 fmt::runtime(Tr("Optimized settings already installed for {}, but apply failed.")),
                                                  title_id);
                     } else {
                       action_status_ = applied
                                            ? fmt::format(
-                                                 "Downloaded optimized settings and applied config for {}.",
+                                                 fmt::runtime(Tr("Downloaded optimized settings and applied config for {}.")),
                                                  title_id)
                                            : fmt::format(
-                                                 "Downloaded optimized settings for {}, but apply failed.",
+                                                 fmt::runtime(Tr("Downloaded optimized settings for {}, but apply failed.")),
                                                  title_id);
                     }
                     action_popup_mode_ = ActionPopupMode::kInfo;
@@ -3277,14 +3278,14 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
                   } else {
                     if (msg == "not_found") {
                       action_status_ =
-                          "No optimized settings were found online for this title.";
+                          Tr("No optimized settings were found online for this title.");
                       action_popup_mode_ = ActionPopupMode::kInfo;
                       show_action_status_ = true;
                     } else {
                       open_manual_prompt(
                           config_root, ManualInstallKind::kConfig, title_id,
-                          "Failed to download optimized settings automatically.\n"
-                          "Do you want to select a config manually?");
+                          Tr("Failed to download optimized settings automatically.\n"
+                          "Do you want to select a config manually?"));
                     }
                   }
                 });
@@ -3466,7 +3467,7 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
               unknown_option.name = entry.first;
               unknown_option.category = entry.second.category;
               unknown_option.description =
-                  "Unknown or legacy option loaded from existing file.";
+                  Tr("Unknown or legacy option loaded from existing file.");
               unknown_option.default_value = entry.second.value;
               unknown_option.value_type = PerGameConfigValueType::kUnknown;
               per_game_config_options_.push_back(std::move(unknown_option));
@@ -3702,12 +3703,12 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
         };
         auto draw_spaced = [&](ImFont* font, float size, ImVec2 pos, ImU32 col,
                                const std::string& t, float spacing) {
-          char ch[2] = {0, 0};
-          for (char c : t) {
-            ch[0] = c;
-            page_draw_list->AddText(font, size, pos, col, ch, ch + 1);
-            pos.x += font->CalcTextSizeA(size, FLT_MAX, 0.0f, ch, ch + 1).x +
-                     spacing;
+          for (const char* p = t.c_str(); *p;) {
+            const char* next = p + ui::i18n::Utf8Length(p);
+            page_draw_list->AddText(font, size, pos, col, p, next);
+            pos.x +=
+                font->CalcTextSizeA(size, FLT_MAX, 0.0f, p, next).x + spacing;
+            p = next;
           }
           return pos.x;
         };
@@ -3839,18 +3840,20 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
           const float max_w = page_size.x * 0.68f;
           if (!selected_row) {
             draw_spaced(ui_font, 19.0f * s, ImVec2(x, y), kDimColor,
-                        "XBOX 360  /  LIBRARY", 4.0f * s);
+                        Tr("XBOX 360  /  LIBRARY"), 4.0f * s);
             y += 40.0f * s;
             page_draw_list->AddText(display_font, 72.0f * s, ImVec2(x, y),
-                                    kTextColor, "No games yet");
+                                    kTextColor, Tr("No games yet"));
             y += 92.0f * s;
             std::string hint =
-                "Copy games from a PC or phone browser: start the "
-                "transfer server in Storage.";
+                Tr("Copy games from a PC or phone browser: start the "
+                   "transfer server in Storage.");
             auto urls = UWP::GetWebTransferUrls();
             if (UWP::IsWebTransferRunning() && !urls.empty()) {
-              hint = "Open " + urls.front() +
-                     " in a browser on your network to copy games here.";
+              hint = fmt::format(
+                  fmt::runtime(Tr("Open {} in a browser on your network to "
+                                  "copy games here.")),
+                  urls.front());
             }
             page_draw_list->AddText(ui_font, 26.0f * s, ImVec2(x, y), kDimColor,
                                     hint.c_str());
@@ -3894,8 +3897,8 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
             }
             chips.push_back(selected_row->path.find("DevelopmentFiles") !=
                                     std::string::npos
-                                ? "Dev storage"
-                                : "External storage");
+                                ? Tr("Dev storage")
+                                : Tr("External storage"));
             float cx = x;
             const float chip_font = 20.0f * s;
             const float chip_h = 38.0f * s;
@@ -3918,6 +3921,7 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
             // Action pills: Play (A) and Options (X).
             auto draw_action_pill = [&](float px, const char* label,
                                         char button, bool primary) {
+              label = Tr(label);
               const float h = 66.0f * s;
               const float font = 30.0f * s;
               const float icon = 34.0f * s;
@@ -3926,7 +3930,9 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
               const ImVec2 mn(px, y), mx(px + w, y + h);
               if (primary) {
                 page_draw_list->AddRectFilled(
-                    mn, mx, IM_COL32(246, 247, 255, 255), h * 0.5f);
+                    mn, mx, IM_COL32(112, 108, 255, 225), h * 0.5f);
+                page_draw_list->AddRect(mn, mx, IM_COL32(200, 205, 255, 90),
+                                        h * 0.5f, 0, 1.5f * s);
               } else {
                 page_draw_list->AddRectFilled(
                     mn, mx, IM_COL32(255, 255, 255, 24), h * 0.5f);
@@ -3935,7 +3941,7 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
               }
               page_draw_list->AddText(
                   ui_font, font, ImVec2(px + 42.0f * s, y + (h - font) * 0.5f),
-                  primary ? IM_COL32(12, 14, 30, 255) : kTextColor, label);
+                  kTextColor, label);
               if (auto icon_tex = GetOrCreateButtonTexture(button)) {
                 const float ix = mx.x - 24.0f * s - icon;
                 const float iy = y + (h - icon) * 0.5f;
@@ -3954,16 +3960,17 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
         const float section_y = page_origin.y + hero_h;
         page_draw_list->AddText(display_font, 34.0f * s,
                                 ImVec2(page_origin.x + 16.0f * s, section_y),
-                                kTextColor, "Library");
+                                kTextColor, Tr("Library"));
         {
-          const std::string count =
-              std::to_string(game_rows.size()) +
-              (game_rows.size() == 1 ? " TITLE" : " TITLES");
+          const std::string count = fmt::format(
+              fmt::runtime(Tr(game_rows.size() == 1 ? "{} TITLE" : "{} TITLES")),
+              game_rows.size());
           float w = 0.0f;
-          for (char c : count) {
-            char ch[2] = {c, 0};
-            w += ui_font->CalcTextSizeA(18.0f * s, FLT_MAX, 0.0f, ch).x +
+          for (const char* p = count.c_str(); *p;) {
+            const char* next = p + ui::i18n::Utf8Length(p);
+            w += ui_font->CalcTextSizeA(18.0f * s, FLT_MAX, 0.0f, p, next).x +
                  4.0f * s;
+            p = next;
           }
           draw_spaced(ui_font, 18.0f * s,
                       ImVec2(page_origin.x + page_size.x - w - 16.0f * s,
@@ -4447,7 +4454,7 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
               }
 
               if (has_query && filtered_rows.empty()) {
-                ImGui::TextWrapped("No games match your search.");
+                ImGui::TextWrapped(Tr("No games match your search."));
               }
             }
             ImGui::EndChild();
@@ -4466,6 +4473,7 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
             auto draw_footer_prompt = [&](char button, const char* text,
                                           float text_y, float text_x,
                                           float icon_offset) {
+              text = Tr(text);
               DrawTextWithConfiguredEffect(
                   overlay_draw_list, ImGui::GetFont(), footer_text_size,
                   ImVec2(text_x, text_y), IM_COL32(205, 205, 205, 255), text);
@@ -4637,6 +4645,7 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
               const ImGuiStyle& option_style = ImGui::GetStyle();
               std::string option_id =
                   fmt::format("{}##game_ctx_option", visible_label);
+              visible_label = Tr(visible_label);
               if (focus_first_game_context_option) {
                 ImGui::SetKeyboardFocusHere();
                 focus_first_game_context_option = false;
@@ -4690,8 +4699,8 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
                 pending_existing_download_destination_ = patches_root;
                 pending_existing_download_title_id_ = title_id;
                 action_status_ = fmt::format(
-                    "Patch files for {} already exist.\n"
-                    "Re-download and override existing files, or cancel?",
+                    fmt::runtime(Tr("Patch files for {} already exist.\n"
+                    "Re-download and override existing files, or cancel?")),
                     title_id);
                 action_popup_mode_ = ActionPopupMode::kExistingDownloadPrompt;
                 show_action_status_ = true;
@@ -4699,7 +4708,7 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
                 begin_patch_download(title_id, patches_root);
               }
             } else {
-              action_status_ = "Could not resolve title ID for patch download.";
+              action_status_ = Tr("Could not resolve title ID for patch download.");
               action_popup_mode_ = ActionPopupMode::kInfo;
               show_action_status_ = true;
             }
@@ -4718,8 +4727,8 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
                 pending_existing_download_destination_ = config_root;
                 pending_existing_download_title_id_ = title_id;
                 action_status_ = fmt::format(
-                    "Optimized settings for {} already exist.\n"
-                    "Re-download and override existing settings, or cancel?",
+                    fmt::runtime(Tr("Optimized settings for {} already exist.\n"
+                    "Re-download and override existing settings, or cancel?")),
                     title_id);
                 action_popup_mode_ = ActionPopupMode::kExistingDownloadPrompt;
                 show_action_status_ = true;
@@ -4728,7 +4737,7 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
               }
             } else {
               action_status_ =
-                  "Could not resolve title ID for optimized settings download.";
+                  Tr("Could not resolve title ID for optimized settings download.");
               action_popup_mode_ = ActionPopupMode::kInfo;
               show_action_status_ = true;
             }
@@ -4753,7 +4762,7 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
               return std::string();
             }();
             if (title_id.empty()) {
-              action_status_ = "Could not resolve title ID for per-game config.";
+              action_status_ = Tr("Could not resolve title ID for per-game config.");
               action_popup_mode_ = ActionPopupMode::kInfo;
               show_action_status_ = true;
             } else if (!std::filesystem::exists(config_path)) {
@@ -4762,8 +4771,8 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
               pending_per_game_config_title_display_ =
                   pergame_display_name.empty() ? title_id : pergame_display_name;
               action_status_ =
-                  "No per-game config exists for this title yet.\n"
-                  "Create one now, or browse and edit an existing file.";
+                  Tr("No per-game config exists for this title yet.\n"
+                  "Create one now, or browse and edit an existing file.");
               action_popup_mode_ = ActionPopupMode::kPerGameConfigPrompt;
               show_action_status_ = true;
             } else {
@@ -4808,7 +4817,7 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
                     std::filesystem::copy_options::overwrite_existing, copy_ec);
                 if (copy_ec) {
                   action_status_ =
-                      "Failed to copy file. Please try again.";
+                      Tr("Failed to copy file. Please try again.");
                 } else {
                   bool enabled = true;
                   if (pending_manual_kind_ == ManualInstallKind::kPatch) {
@@ -4830,23 +4839,23 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
                   switch (pending_manual_kind_) {
                     case ManualInstallKind::kPatch:
                       action_status_ = enabled
-                                            ? "Patch installed manually."
-                                            : "Patch copied, but enabling failed.";
+                                            ? Tr("Patch installed manually.")
+                                            : Tr("Patch copied, but enabling failed.");
                       break;
                     case ManualInstallKind::kPlugin:
                       action_status_ = plugin_layout_ok
-                                           ? "Plugin installed manually."
+                                           ? Tr("Plugin installed manually.")
                                            : fmt::format(
-                                                 "Plugin copied manually, but plugins.toml layout is incomplete.\n{}",
+                                                 fmt::runtime(Tr("Plugin copied manually, but plugins.toml layout is incomplete.\n{}")),
                                                  plugin_layout_error);
                       break;
                     case ManualInstallKind::kConfig:
                       action_status_ = config_applied
-                                           ? "Optimized settings installed and applied manually."
-                                           : "Optimized settings copied manually, but apply failed.";
+                                           ? Tr("Optimized settings installed and applied manually.")
+                                           : Tr("Optimized settings copied manually, but apply failed.");
                       break;
                     default:
-                      action_status_ = "File installed.";
+                      action_status_ = Tr("File installed.");
                       break;
                   }
                 }
@@ -4874,11 +4883,11 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
                           &layout_error);
                       if (layout_ok) {
                         action_status_ = fmt::format(
-                            "Downloaded and installed plugins for {}.",
+                            fmt::runtime(Tr("Downloaded and installed plugins for {}.")),
                             title_id);
                       } else {
                         action_status_ = fmt::format(
-                            "Downloaded plugin files for {}, but install layout is incomplete.\n{}",
+                            fmt::runtime(Tr("Downloaded plugin files for {}, but install layout is incomplete.\n{}")),
                             title_id, layout_error);
                       }
                       action_popup_mode_ = ActionPopupMode::kInfo;
@@ -4891,12 +4900,12 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
                       open_manual_prompt(
                           title_plugins_dir, ManualInstallKind::kPlugin,
                           title_id,
-                          "No matching plugins were found online.\n"
-                          "Do you want to select a plugin manually?");
+                          Tr("No matching plugins were found online.\n"
+                          "Do you want to select a plugin manually?"));
                     }
                   });
             } else {
-              action_status_ = "Could not resolve title ID for plugin download.";
+              action_status_ = Tr("Could not resolve title ID for plugin download.");
               action_popup_mode_ = ActionPopupMode::kInfo;
               show_action_status_ = true;
             }
@@ -4921,7 +4930,7 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
 
             if (title_id.empty()) {
               action_status_ =
-                  "Could not resolve title ID for title update management.";
+                  Tr("Could not resolve title ID for title update management.");
               action_popup_mode_ = ActionPopupMode::kInfo;
               show_action_status_ = true;
             } else {
@@ -4932,7 +4941,7 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
                       std::string message) {
                     if (!ok) {
                       action_status_ = message.empty()
-                                           ? "Failed to download title updates."
+                                           ? Tr("Failed to download title updates.")
                                            : message;
                       action_popup_mode_ = ActionPopupMode::kInfo;
                       show_action_status_ = true;
@@ -5019,7 +5028,7 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
                       }
                       if (cleanup_ec) {
                         action_status_ = fmt::format(
-                            "Installed new title update for {}, but failed to clean up older title updates.",
+                            fmt::runtime(Tr("Installed new title update for {}, but failed to clean up older title updates.")),
                             title_id);
                         action_popup_mode_ = ActionPopupMode::kInfo;
                         show_action_status_ = true;
@@ -5029,13 +5038,13 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
 
                     if (failed > 0) {
                       action_status_ = fmt::format(
-                          "{} Installed {} title update package(s); {} failed."
-                          "\nFailed downloads remain in: {}",
+                          fmt::runtime(Tr("{} Installed {} title update package(s); {} failed."
+                          "\nFailed downloads remain in: {}")),
                           message, installed, failed,
                           xe::path_to_utf8(title_updates_root));
                     } else {
                       action_status_ = fmt::format(
-                          "{} Installed {} title update package(s).", message,
+                          fmt::runtime(Tr("{} Installed {} title update package(s).")), message,
                           installed);
                     }
                     action_popup_mode_ = ActionPopupMode::kInfo;
@@ -5172,7 +5181,7 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
           };
           auto draw_action_button = [&](const char* label,
                                         const ImVec2& size = ImVec2(0.0f, 0.0f)) {
-            return DrawTextEffectButton(label, size);
+            return DrawTextEffectButton(Tr(label), size);
           };
 
           if (action_popup_mode_ == ActionPopupMode::kManualPatchPrompt ||
@@ -5213,7 +5222,7 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
                       copy_ec);
                   if (copy_ec) {
                     action_status_ =
-                        "Failed to copy file. Please try again.";
+                        Tr("Failed to copy file. Please try again.");
                   } else {
                     bool enabled = true;
                     if (pending_manual_kind_ == ManualInstallKind::kPatch) {
@@ -5236,23 +5245,23 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
                     switch (pending_manual_kind_) {
                       case ManualInstallKind::kPatch:
                         action_status_ = enabled
-                                              ? "Patch installed manually."
-                                              : "Patch copied, but enabling failed.";
+                                              ? Tr("Patch installed manually.")
+                                              : Tr("Patch copied, but enabling failed.");
                         break;
                       case ManualInstallKind::kPlugin:
                         action_status_ = plugin_layout_ok
-                                             ? "Plugin installed manually."
+                                             ? Tr("Plugin installed manually.")
                                              : fmt::format(
-                                                   "Plugin copied manually, but plugins.toml layout is incomplete.\n{}",
+                                                   fmt::runtime(Tr("Plugin copied manually, but plugins.toml layout is incomplete.\n{}")),
                                                    plugin_layout_error);
                         break;
                       case ManualInstallKind::kConfig:
                         action_status_ = config_applied
-                                             ? "Optimized settings installed and applied manually."
-                                             : "Optimized settings copied manually, but apply failed.";
+                                             ? Tr("Optimized settings installed and applied manually.")
+                                             : Tr("Optimized settings copied manually, but apply failed.");
                         break;
                       default:
-                        action_status_ = "File installed.";
+                        action_status_ = Tr("File installed.");
                         break;
                     }
                   }
@@ -5376,8 +5385,8 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
           const ImGuiViewport* viewport = ImGui::GetMainViewport();
           const std::string pergame_header_title =
               pending_per_game_config_title_display_.empty()
-                  ? std::string("Game Config")
-                  : fmt::format("{} - Game Config", pending_per_game_config_title_display_);
+                  ? std::string(Tr("Game Config"))
+                  : fmt::format(fmt::runtime(Tr("{} - Game Config")), pending_per_game_config_title_display_);
           std::string guide_asset_path =
               ResolveConfiguredGuideBackgroundAssetPath(true);
 
@@ -5463,7 +5472,7 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
               (36.0f * display_scale) + (30.0f * display_scale);
 
           const std::string pergame_help_text =
-              "Controller: + add, - remove mode, select option to edit/apply.";
+              Tr("Controller: + add, - remove mode, select option to edit/apply.");
           const ImVec2 pergame_help_pos(
               pergame_content_left,
               pergame_content_top + (0.0f * display_scale));
@@ -5621,7 +5630,7 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
 
               ImGui::SameLine();
             std::string add_label = per_game_config_add_candidate_.empty()
-                                        ? "No more options"
+                                        ? Tr("No more options")
                                         : per_game_config_add_candidate_;
             const float add_combo_width = ImGui::CalcItemWidth() * 1.3f;
             ImGui::SetNextItemWidth(add_combo_width);
@@ -5755,8 +5764,8 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
             }
 
             const std::string pergame_list_header = fmt::format(
-                "Configured options ({}){}" , per_game_config_entries_.size(),
-                per_game_config_remove_mode_ ? " - remove mode active" : "");
+                fmt::runtime(Tr("Configured options ({}){}")) , per_game_config_entries_.size(),
+                per_game_config_remove_mode_ ? Tr(" - remove mode active") : "");
             const ImVec2 pergame_list_header_pos = ImGui::GetCursorScreenPos();
             DrawTextWithConfiguredEffect(
                 ImGui::GetWindowDrawList(), ImGui::GetFont(), ImGui::GetFontSize(),
@@ -5920,14 +5929,14 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
 
             if (!active_pergame_option) {
               const std::string pergame_placeholder_text =
-                  "Select a configured option to edit its value.";
+                  Tr("Select a configured option to edit its value.");
               draw_wrapped_pergame_right_text(pergame_placeholder_text);
             } else {
               auto* option = active_pergame_option;
 
               if (option) {
                 const std::string pergame_category_text =
-                    fmt::format("Category: {}", option->category);
+                    fmt::format(fmt::runtime(Tr("Category: {}")), option->category);
                 draw_wrapped_pergame_right_text(pergame_category_text);
                 if (!option->description.empty()) {
                   ImGui::Separator();
@@ -5937,18 +5946,18 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
 
               ImGui::Separator();
               const std::string pergame_value_text =
-                  fmt::format("Current value: {}", active_pergame_value);
+                  fmt::format(fmt::runtime(Tr("Current value: {}")), active_pergame_value);
               draw_wrapped_pergame_right_text(pergame_value_text);
 
               if (option && !option->enum_values.empty()) {
                 ImGui::Separator();
-                const std::string pergame_choose_text = "Choose value:";
+                const std::string pergame_choose_text = Tr("Choose value:");
                 draw_wrapped_pergame_right_text(pergame_choose_text);
                 for (const auto& enum_value_raw : option->enum_values) {
                   std::string normalized =
                       canonicalize_per_game_value(*option, enum_value_raw);
                   std::string display = enum_value_raw.empty()
-                                            ? "(empty/default)"
+                                            ? Tr("(empty/default)")
                                             : enum_value_raw;
                   if (option->name == "user_language") {
                     if (normalized == "1") {
@@ -6024,7 +6033,7 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
                 }
               } else if (option && option->value_type == PerGameConfigValueType::kBool) {
                 bool bool_value = (active_pergame_value == "true");
-                if (ImGui::Button(bool_value ? "Set false" : "Set true")) {
+                if (ImGui::Button(bool_value ? Tr("Set false") : Tr("Set true"))) {
                   std::string next_value = bool_value ? "false" : "true";
                   apply_per_game_value_change(next_value);
                 }
@@ -6123,12 +6132,12 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
                 }
               } else {
                 const std::string pergame_fallback_text =
-                    "No controller preset editor for this type yet. Use default/reset or known enums.";
+                    Tr("No controller preset editor for this type yet. Use default/reset or known enums.");
                 draw_wrapped_pergame_right_text(pergame_fallback_text);
                 if (option &&
                     (option->value_type == PerGameConfigValueType::kString ||
                      option->value_type == PerGameConfigValueType::kPath) &&
-                    ImGui::Button("Set Empty")) {
+                    ImGui::Button(Tr("Set Empty"))) {
                   apply_per_game_value_change("\"\"");
                 }
                 track_per_game_focus(PerGameConfigFocusSide::kRight,
@@ -6137,7 +6146,7 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
 
               if (option) {
                 ImGui::Separator();
-                if (ImGui::Button("Reset To Default")) {
+                if (ImGui::Button(Tr("Reset To Default"))) {
                   apply_per_game_value_change(option->default_value);
                 }
                 track_per_game_focus(PerGameConfigFocusSide::kRight,
@@ -6248,14 +6257,14 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
                 pending_per_game_config_path_.parent_path(), mkdir_ec);
             if (mkdir_ec) {
               action_status_ = fmt::format(
-                  "Failed to create config directory: {}", mkdir_ec.message());
+                  fmt::runtime(Tr("Failed to create config directory: {}")), mkdir_ec.message());
               action_popup_mode_ = ActionPopupMode::kInfo;
               show_action_status_ = true;
             } else {
               std::ofstream ofs(pending_per_game_config_path_, std::ios::binary);
               if (!ofs.is_open()) {
                 action_status_ =
-                    "Failed to write per-game config file (open failed).";
+                    Tr("Failed to write per-game config file (open failed).");
               } else {
                 std::string generated_config = build_per_game_config_text();
                 std::memset(per_game_config_buffer_, 0,
@@ -6268,11 +6277,11 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
                 if (apply_per_game_config(pending_per_game_config_title_id_,
                                           pending_per_game_config_path_)) {
                   action_status_ = fmt::format(
-                      "Per-game config saved and applied for {}.",
+                      fmt::runtime(Tr("Per-game config saved and applied for {}.")),
                       pending_per_game_config_title_id_);
                 } else {
                   action_status_ =
-                      "Per-game config saved, but apply failed (check xenia.log).";
+                      Tr("Per-game config saved, but apply failed (check xenia.log).");
                 }
               }
               action_popup_mode_ = ActionPopupMode::kInfo;
@@ -6490,14 +6499,16 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
         {
           // Config export / import (backups live on the dev partition and
           // are shared through the web transfer page).
-          static std::string config_status = "Nothing exported yet.";
+          static std::string config_status = Tr("Nothing exported yet.");
           xs::Category cfg{"Config backups", {}};
           cfg.options.push_back(xs::Action(
               "Export current config",
               []() {
                 const std::string name = UWP::ExportConfig();
                 config_status =
-                    name.empty() ? "Export failed." : "Exported " + name;
+                    name.empty()
+                        ? std::string(Tr("Export failed."))
+                        : fmt::format(fmt::runtime(Tr("Exported {}")), name);
               },
               "Saves a copy of your current settings as a backup. Backups "
               "also appear in the web transfer page under Config backups, so "
@@ -6507,19 +6518,22 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
             xs::Option row = xs::Action(
                 backup,
                 [backup]() {
-                  config_status = UWP::ImportConfig(backup)
-                                      ? "Imported " + backup +
-                                            ". Restart Xenon to apply all of "
-                                            "it."
-                                      : "Import failed.";
+                  config_status =
+                      UWP::ImportConfig(backup)
+                          ? fmt::format(
+                                fmt::runtime(Tr("Imported {}. Restart Xenon "
+                                                "to apply all of it.")),
+                                backup)
+                          : std::string(Tr("Import failed."));
                 },
                 "Press A to replace your current settings with this backup. "
                 "Press Y to delete the backup.",
                 nullptr, "Import");
             row.secondary = [backup]() {
-              config_status = UWP::DeleteConfigBackup(backup)
-                                  ? "Deleted " + backup
-                                  : "Delete failed.";
+              config_status =
+                  UWP::DeleteConfigBackup(backup)
+                      ? fmt::format(fmt::runtime(Tr("Deleted {}")), backup)
+                      : std::string(Tr("Delete failed."));
             };
             row.secondary_label = "Delete";
             cfg.options.push_back(std::move(row));
@@ -6654,7 +6668,11 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
                        "Maintains the Xenia Canary UWP port."),
               xs::Info("Space Grotesk", text("Font (OFL)"),
                        "Interface font by Florian Karsten, licensed under the "
-                       "SIL Open Font License.")}});
+                       "SIL Open Font License."),
+              xs::Info("Noto Sans", text("Font (OFL)"),
+                       "Japanese, Korean, Chinese and Cyrillic text by the "
+                       "Noto Project, licensed under the SIL Open Font "
+                       "License.")}});
         g_xenon_active_page_state = &xenon_about_state;
         xs::Draw(xenon_about_state, about, display_scale,
                  xe::ui::GetXenonDisplayFont());
@@ -6693,12 +6711,11 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
       };
       auto draw_spaced = [&](ImFont* f, float size, ImVec2 pos, ImU32 col,
                              const char* t, float spacing) {
-        char ch[2] = {0, 0};
-        for (const char* p = t; *p; ++p) {
-          ch[0] = *p;
-          frontend_draw_list->AddText(f, size, pos, col, ch, ch + 1);
-          pos.x +=
-              f->CalcTextSizeA(size, FLT_MAX, 0.0f, ch, ch + 1).x + spacing;
+        for (const char* p = t; *p;) {
+          const char* next = p + ui::i18n::Utf8Length(p);
+          frontend_draw_list->AddText(f, size, pos, col, p, next);
+          pos.x += f->CalcTextSizeA(size, FLT_MAX, 0.0f, p, next).x + spacing;
+          p = next;
         }
         return pos.x;
       };
@@ -6727,7 +6744,8 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
                   "SERIES X|S", 5.0f * s);
 
       // Sidebar navigation with a sliding highlight.
-      const char* tab_names[4] = {"Library", "Settings", "Storage", "About"};
+      const char* tab_names[4] = {Tr("Library"), Tr("Settings"),
+                                  Tr("Storage"), Tr("About")};
       const float side_x = 24.0f * s;
       const float side_w = 272.0f * s;
       const float item_h = 70.0f * s;
@@ -6745,6 +6763,7 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
 
       const float list_bottom = list_top + 4.0f * (item_h + item_gap);
       auto draw_bumper = [&](const char* label, const char* hint, float cy) {
+        hint = Tr(hint);
         const float w = 56.0f * s, h = 34.0f * s;
         const ImVec2 mn(side_x + 14.0f * s, cy - h * 0.5f);
         const ImVec2 mx(mn.x + w, cy + h * 0.5f);
@@ -6840,7 +6859,7 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
                                   ImVec2(rx, bar_cy - clock_font * 0.5f), kText,
                                   clock);
       if (UWP::IsWebTransferRunning()) {
-        const char* label = "Transfer on";
+        const char* label = Tr("Transfer on");
         const float f = 19.0f * s;
         const float h = 38.0f * s;
         const float w = tw(ui_font, f, label) + 50.0f * s;
@@ -6862,6 +6881,7 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
       const float foot_cy = ds.y - 52.0f * s;
       float fx = 368.0f * s;
       auto draw_hint = [&](char button, const char* label) {
+        label = Tr(label);
         const float icon = 34.0f * s;
         if (auto tex = GetOrCreateButtonTexture(button)) {
           frontend_draw_list->AddImage(
