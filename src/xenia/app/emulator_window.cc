@@ -250,6 +250,19 @@ DEFINE_int32(recent_titles_entry_amount, 10,
 namespace xe {
 namespace app {
 
+// Lets the right stick scroll the current window (frontend pages).
+static void XenonGamepadScroll() {
+  if (ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId)) return;
+  const float v =
+      ImGui::GetIO().KeysData[ImGuiKey_GamepadRStickDown - ImGuiKey_NamedKey_BEGIN].AnalogValue -
+      ImGui::GetIO().KeysData[ImGuiKey_GamepadRStickUp - ImGuiKey_NamedKey_BEGIN].AnalogValue;
+  if (v > 0.15f || v < -0.15f) {
+    const float speed = 1600.0f * (ImGui::GetIO().DisplaySize.x / 1920.0f);
+    ImGui::SetScrollY(ImGui::GetScrollY() +
+                      v * speed * std::min(ImGui::GetIO().DeltaTime, 0.1f));
+  }
+}
+
 using xe::ui::FileDropEvent;
 using xe::ui::KeyEvent;
 #if !XE_PLATFORM_WINRT
@@ -2110,10 +2123,10 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
   }
 
   // Xenon shell: the page area sits between the top bar and the footer.
-  const float shell_margin_x = 80.0f * display_scale;
-  const float shell_top = 128.0f * display_scale;
-  const float shell_bottom = 104.0f * display_scale;
-  const float shell_sidebar_w = 340.0f * display_scale;
+  const float shell_margin_x = 56.0f * display_scale;
+  const float shell_top = 104.0f * display_scale;
+  const float shell_bottom = 88.0f * display_scale;
+  const float shell_sidebar_w = 368.0f * display_scale;
   const float frontend_width =
       io.DisplaySize.x - shell_sidebar_w - shell_margin_x;
   const float frontend_height = io.DisplaySize.y - shell_top - shell_bottom;
@@ -5920,7 +5933,7 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
           settings_focus_on_right = false;
         }
 
-        const float settings_plane_margin = 40.0f;
+        const float settings_plane_margin = 12.0f * display_scale;
         ImVec2 settings_plane_origin = ImGui::GetCursorPos();
         ImVec2 settings_plane_avail = ImGui::GetContentRegionAvail();
         ImVec2 settings_plane_size(
@@ -5934,6 +5947,7 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
         if (ImGui::BeginChild("##settings_editor_plane", settings_plane_size,
                               false)) {
+          XenonGamepadScroll();
           const float settings_content_offset_x = 15.0f * display_scale;
           ImGui::Indent(settings_content_offset_x);
           if (settings_focus_requested) {
@@ -7796,7 +7810,7 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
           }
         }
 
-        const float paths_plane_margin = 40.0f;
+        const float paths_plane_margin = 12.0f * display_scale;
         ImVec2 paths_plane_origin = ImGui::GetCursorPos();
         ImVec2 paths_plane_avail = ImGui::GetContentRegionAvail();
         ImVec2 paths_plane_size(
@@ -7806,6 +7820,7 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
                                    paths_plane_origin.y + paths_plane_margin));
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
         if (ImGui::BeginChild("##paths_editor_plane", paths_plane_size, false)) {
+          XenonGamepadScroll();
           if (paths_focus_requested) {
             ImGui::SetWindowFocus();
           }
@@ -8010,7 +8025,7 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
           about_focus_requested = true;
         }
 
-        const float about_plane_margin = 40.0f;
+        const float about_plane_margin = 12.0f * display_scale;
         ImVec2 about_plane_origin = ImGui::GetCursorPos();
         ImVec2 about_plane_avail = ImGui::GetContentRegionAvail();
         ImVec2 about_plane_size(
@@ -8020,6 +8035,7 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
                                    about_plane_origin.y + about_plane_margin));
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
         if (ImGui::BeginChild("##about_editor_plane", about_plane_size, false)) {
+          XenonGamepadScroll();
           if (about_focus_requested) {
             ImGui::SetWindowFocus();
           }
@@ -8182,20 +8198,27 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
 
       // Wordmark.
       const float mark_size = 38.0f * s;
-      const float after_mark = draw_spaced(
-          brand_font, mark_size, ImVec2(96.0f * s, bar_cy - mark_size * 0.5f),
-          kText, "XENON", 10.0f * s);
-      draw_spaced(ui_font, 18.0f * s,
-                  ImVec2(after_mark + 18.0f * s, bar_cy - 9.0f * s), kDim,
-                  "SERIES X|S", 4.0f * s);
+      // Full-height sidebar panel.
+      const float sidebar_panel_w = 320.0f * s;
+      frontend_draw_list->AddRectFilledMultiColor(
+          ImVec2(0.0f, 0.0f), ImVec2(sidebar_panel_w, ds.y),
+          IM_COL32(14, 16, 34, 235), IM_COL32(12, 14, 30, 215),
+          IM_COL32(8, 10, 22, 215), IM_COL32(10, 12, 26, 235));
+      frontend_draw_list->AddLine(ImVec2(sidebar_panel_w, 0.0f),
+                                  ImVec2(sidebar_panel_w, ds.y),
+                                  IM_COL32(255, 255, 255, 26), 1.5f * s);
+      draw_spaced(brand_font, mark_size, ImVec2(44.0f * s, 52.0f * s), kText,
+                  "XENON", 10.0f * s);
+      draw_spaced(ui_font, 17.0f * s, ImVec2(46.0f * s, 100.0f * s), kDim,
+                  "SERIES X|S", 5.0f * s);
 
       // Sidebar navigation with a sliding highlight.
       const char* tab_names[4] = {"Library", "Settings", "Storage", "About"};
-      const float side_x = 48.0f * s;
-      const float side_w = 264.0f * s;
+      const float side_x = 24.0f * s;
+      const float side_w = 272.0f * s;
       const float item_h = 70.0f * s;
       const float item_gap = 10.0f * s;
-      const float list_top = 230.0f * s;
+      const float list_top = 240.0f * s;
       const int active = static_cast<int>(active_frontend_page_);
       const float dt = std::min(io.DeltaTime, 0.1f);
       const float ease = 1.0f - std::exp(-dt * 14.0f);
@@ -8207,15 +8230,6 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
       pill_y += (target_y - pill_y) * ease;
 
       const float list_bottom = list_top + 4.0f * (item_h + item_gap);
-      const ImVec2 panel_min(side_x - 14.0f * s, list_top - 76.0f * s);
-      const ImVec2 panel_max(side_x + side_w + 14.0f * s,
-                             list_bottom + 66.0f * s);
-      frontend_draw_list->AddRectFilled(panel_min, panel_max,
-                                        IM_COL32(255, 255, 255, 10), 24.0f * s);
-      frontend_draw_list->AddRect(panel_min, panel_max,
-                                  IM_COL32(255, 255, 255, 24), 24.0f * s, 0,
-                                  1.5f * s);
-
       auto draw_bumper = [&](const char* label, const char* hint, float cy) {
         const float w = 56.0f * s, h = 34.0f * s;
         const ImVec2 mn(side_x + 14.0f * s, cy - h * 0.5f);
@@ -8292,8 +8306,8 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
       if (page_fade > 0.0f) {
         const float a = page_fade * page_fade;
         ImGui::GetForegroundDrawList()->AddRectFilled(
-            ImVec2(340.0f * s, 120.0f * s),
-            ImVec2(ds.x - 72.0f * s, ds.y - 96.0f * s),
+            ImVec2(368.0f * s, 104.0f * s),
+            ImVec2(ds.x - 56.0f * s, ds.y - 88.0f * s),
             IM_COL32(8, 10, 24, int(a * 230.0f)), 18.0f * s);
       }
 
@@ -8331,7 +8345,7 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
 
       // Footer: button hints (left) and version (right).
       const float foot_cy = ds.y - 52.0f * s;
-      float fx = 96.0f * s;
+      float fx = 368.0f * s;
       auto draw_hint = [&](char button, const char* label) {
         const float icon = 34.0f * s;
         if (auto tex = GetOrCreateButtonTexture(button)) {
@@ -8354,7 +8368,7 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
         draw_hint('A', "Select");
         draw_hint('B', "Back");
       }
-      const char* version = "Xenia-Xenon v1.1.7.6";
+      const char* version = "Xenia-Xenon v1.1.7.7";
       const float vf = 20.0f * s;
       frontend_draw_list->AddText(
           ui_font, vf,
