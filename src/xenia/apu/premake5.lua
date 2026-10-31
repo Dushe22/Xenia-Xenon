@@ -13,6 +13,7 @@ project("xenia-apu")
     "xenia-base",
   })
   includedirs({
+    project_root.."/third_party/ffmpeg-xenia",
     project_root.."/third_party/FFmpeg",
   })
   local_platform_files()

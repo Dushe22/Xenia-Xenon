@@ -33,6 +33,8 @@
 
 #include "xenia/app/profile_dialogs.h"
 #include "xenia/app/ui_text_effect_helpers.h"
+#include "xenia/app/console_settings_dialog.h"
+#include "xenia/app/content_list_dialog.h"
 #include "xenia/base/assert.h"
 #include "xenia/base/filesystem.h"
 #include "xenia/base/clock.h"
@@ -53,6 +55,8 @@
 #include "xenia/kernel/xam/xam_module.h"
 //#include "xenia/ui/file_picker.h"
 #include "xenia/app/xenon_settings_page.h"
+#include "xenia/kernel/xam/xam_state.h"
+#include "xenia/kernel/xconfig.h"
 #include "xenia/ui/graphics_provider.h"
 #include "xenia/ui/imgui_dialog.h"
 #include "xenia/ui/imgui_drawer.h"
@@ -259,7 +263,7 @@ namespace app {
 
 // Lets the right stick scroll the current window (frontend pages).
 static xe::app::xenon_settings::State* g_xenon_active_page_state = nullptr;
-static constexpr char kXenonVersion[] = "1.1.9.3";
+static constexpr char kXenonVersion[] = "1.2.0.0";
 static bool g_xenon_pergame_on_right = false;
 
 static void XenonGamepadScroll() {
@@ -466,6 +470,28 @@ void EmulatorWindow::EmulatorWindowListener::OnMouseUp(ui::MouseEvent& e) {
   emulator_window_.OnMouseUp(e);
 }
 
+void EmulatorWindow::EmulatorWindowListener::OnUsbDeviceChanged(
+    bool is_arrival) {
+  if (!emulator_window_.emulator()) {
+    return;
+  }
+
+  if (!emulator_window_.emulator()->input_system()) {
+    return;
+  }
+
+  auto* portal = emulator_window_.emulator()->input_system()->GetPortal();
+  if (!portal) {
+    return;
+  }
+
+  if (is_arrival) {
+    portal->OnDeviceArrival();
+  } else {
+    portal->OnDeviceRemoval();
+  }
+}
+
 void EmulatorWindow::DisplayConfigGameConfigLoadCallback::PostGameConfigLoad() {
   emulator_window_.ApplyDisplayConfigForCvars();
 }
@@ -492,6 +518,7 @@ void EmulatorWindow::DisplayConfigDialog::OnDraw(ImGuiIO& io) {
                         ImGuiWindowFlags_AlwaysAutoResize |
                         ImGuiWindowFlags_HorizontalScrollbar)) {
     ImGui::End();
+    Close();
     return;
   }
   // Even if the close button has been pressed, still paint everything not to
@@ -719,6 +746,7 @@ void EmulatorWindow::DisplayConfigDialog::OnDraw(ImGuiIO& io) {
   ImGui::End();
 
   if (!dialog_open) {
+    Close();
     emulator_window_.ToggleDisplayConfigDialog();
     // `this` might have been destroyed by ToggleDisplayConfigDialog.
     return;
@@ -774,6 +802,7 @@ bool EmulatorWindow::Initialize() {
         MenuItem::Type::kString, "Time Scalar *= 2", "Numpad +",
         std::bind(&EmulatorWindow::CpuTimeScalarSetDouble, this)));
   }
+#if XE_OPTION_PROFILING
   cpu_menu->AddChild(MenuItem::Create(MenuItem::Type::kSeparator));
   {
     cpu_menu->AddChild(MenuItem::Create(MenuItem::Type::kString,
@@ -783,6 +812,7 @@ bool EmulatorWindow::Initialize() {
                                         "&Pause/Resume Profiler", "`",
                                         []() { Profiler::TogglePause(); }));
   }
+#endif
   cpu_menu->AddChild(MenuItem::Create(MenuItem::Type::kSeparator));
   {
     cpu_menu->AddChild(MenuItem::Create(
@@ -1292,12 +1322,15 @@ void EmulatorWindow::GpuClearCaches() {
   emulator()->graphics_system()->ClearCaches();
 }
 
-void EmulatorWindow::SetFullscreen(bool fullscreen) {
-  if (window_->IsFullscreen() == fullscreen) {
+void EmulatorWindow::SetFullscreen(bool fullscreen_) {
+  if (window_->IsFullscreen() == fullscreen_) {
     return;
   }
-  window_->SetFullscreen(fullscreen);
-  window_->SetCursorVisibility(fullscreen
+
+  OVERRIDE_bool(fullscreen, fullscreen_);
+
+  window_->SetFullscreen(fullscreen_);
+  window_->SetCursorVisibility(fullscreen_
                                    ? ui::Window::CursorVisibility::kAutoHidden
                                    : ui::Window::CursorVisibility::kVisible);
 }
@@ -1317,11 +1350,209 @@ void EmulatorWindow::ToggleProfilesConfigDialog() {
 
 void EmulatorWindow::ToggleDisplayConfigDialog() {
   if (!display_config_dialog_) {
-    display_config_dialog_ = std::unique_ptr<DisplayConfigDialog>(
-        new DisplayConfigDialog(imgui_drawer_.get(), *this));
+    display_config_dialog_ =
+        std::make_unique<DisplayConfigDialog>(imgui_drawer_.get(), *this);
   } else {
-    display_config_dialog_.reset();
+    if (display_config_dialog_->IsClosing()) {
+      display_config_dialog_.release();
+    } else {
+      display_config_dialog_.reset();
+    }
   }
+}
+
+
+void EmulatorWindow::ToggleConsoleSettingsDialog() {
+  if (!console_settings_dialog_) {
+    console_settings_dialog_ =
+        std::unique_ptr<ConsoleSettingsDialog>(new ConsoleSettingsDialog(
+            imgui_drawer_.get(), *this, emulator_->kernel_state()->xconfig()));
+  } else {
+    if (console_settings_dialog_->IsClosing()) {
+      console_settings_dialog_.release();
+    } else {
+      console_settings_dialog_.reset();
+    }
+  }
+}
+
+void EmulatorWindow::ToggleContentListDialog() {
+  if (!content_list_dialog_) {
+    content_list_dialog_ = std::unique_ptr<ContentListDialog>(
+        new ContentListDialog(imgui_drawer_.get(), *this,
+                              emulator_->kernel_state()->content_manager()));
+  } else {
+    if (content_list_dialog_->IsClosing()) {
+      content_list_dialog_.release();
+    } else {
+      content_list_dialog_.reset();
+    }
+  }
+}
+
+void EmulatorWindow::ContentInstallDialog::OnDraw(ImGuiIO& io) {
+  ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_FirstUseEver);
+  ImGui::SetNextWindowSize(ImVec2(20, 20), ImGuiCond_FirstUseEver);
+
+  bool dialog_open = true;
+  if (!ImGui::Begin(
+          fmt::format("Installation Progress###{}", window_id_).c_str(),
+          &dialog_open,
+          ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_AlwaysAutoResize |
+              ImGuiWindowFlags_HorizontalScrollbar)) {
+    Close();
+    ImGui::End();
+    return;
+  }
+
+  bool is_everything_installed = true;
+  for (const auto& entry : *installation_entries_) {
+    ImGui::BeginTable(fmt::format("table_{}", entry.name_).c_str(), 2);
+    ImGui::TableNextRow(0);
+    ImGui::TableSetColumnIndex(0);
+    if (entry.icon_) {
+      ImGui::Image(reinterpret_cast<ImTextureID>(entry.icon_.get()),
+                   ui::default_image_icon_size);
+    } else {
+      ImGui::Dummy(ui::default_image_icon_size);
+    }
+    ImGui::TableNextColumn();
+
+    ImGui::Text("Name: %s", entry.name_.c_str());
+    ImGui::Text("Installation Path:");
+    ImGui::SameLine();
+    if (ImGui::TextLink(
+            xe::path_to_utf8(entry.data_installation_path_).c_str())) {
+      LaunchFileExplorer(emulator_window_.emulator_->content_root() /
+                         entry.data_installation_path_);
+    }
+
+    if (entry.content_type_ != xe::XContentType::kInvalid) {
+      ImGui::Text("Content Type: %s",
+                  XContentTypeMap.at(entry.content_type_).c_str());
+    }
+
+    std::string result = fmt::format(
+        "Status: {}", xe::Emulator::installStateStringName[static_cast<uint8_t>(
+                          entry.installation_state_)]);
+
+    if (entry.installation_state_ == xe::Emulator::InstallState::failed) {
+      result += fmt::format(" - {} ({:08X})",
+                            entry.installation_error_message_.c_str(),
+                            entry.installation_result_);
+    }
+
+    ImGui::Text("%s", result.c_str());
+    ImGui::EndTable();
+
+    if (entry.content_size_ > 0) {
+      ImGui::ProgressBar(static_cast<float>(entry.currently_installed_size_) /
+                         entry.content_size_);
+
+      if (entry.installation_state_ == Emulator::InstallState::installing ||
+          entry.installation_state_ == Emulator::InstallState::pending ||
+          entry.installation_state_ == Emulator::InstallState::preparing) {
+        is_everything_installed = false;
+      }
+    } else {
+      ImGui::ProgressBar(0.0f);
+    }
+
+    if (installation_entries_->size() > 1) {
+      ImGui::Separator();
+    }
+  }
+  ImGui::Spacing();
+
+  ImGui::BeginDisabled(!is_everything_installed);
+  if (ImGui::Button("Close")) {
+    ImGui::EndDisabled();
+    Close();
+    ImGui::End();
+    return;
+  }
+  ImGui::EndDisabled();
+
+  if (!dialog_open && is_everything_installed) {
+    Close();
+    ImGui::End();
+    return;
+  }
+  ImGui::End();
+}
+
+void EmulatorWindow::ExtractContent(const std::filesystem::path file) {
+  std::vector<std::filesystem::path> package_files;
+  std::filesystem::path extract_dir;
+#if XE_PLATFORM_WINRT
+  // No file pickers on Xbox: extract into Xenon's data folder.
+  if (file.empty()) {
+    return;
+  }
+  package_files.push_back(file);
+  extract_dir =
+      std::filesystem::path(xe::to_path(UWP::GetXenonDataFolder())) /
+      "Extracted";
+  std::error_code ec;
+  std::filesystem::create_directories(extract_dir, ec);
+#else
+  if (!file.empty()) {
+    package_files.push_back(file);
+  } else {
+    auto file_picker = xe::ui::FilePicker::Create();
+    file_picker->set_mode(ui::FilePicker::Mode::kOpen);
+    file_picker->set_type(ui::FilePicker::Type::kFile);
+    file_picker->set_multi_selection(true);
+    file_picker->set_title("Select Content Package");
+    file_picker->set_extensions({
+        {"All Files (*.*)", "*.*"},
+    });
+
+    if (file_picker->Show(window_.get())) {
+      package_files = file_picker->selected_files();
+    }
+
+    if (package_files.empty()) {
+      return;
+    }
+  }
+  auto save_file_picker = xe::ui::FilePicker::Create();
+  save_file_picker->set_mode(ui::FilePicker::Mode::kOpen);
+  save_file_picker->set_type(ui::FilePicker::Type::kDirectory);
+  save_file_picker->set_title("Select Directory to Extract");
+
+  if (save_file_picker->Show(window_.get())) {
+    extract_dir = save_file_picker->selected_files().front();
+  }
+#endif  // XE_PLATFORM_WINRT
+
+  if (extract_dir.empty()) {
+    return;
+  }
+
+  std::shared_ptr<std::vector<Emulator::ContentInstallEntry>>
+      content_installation_status =
+          std::make_shared<std::vector<Emulator::ContentInstallEntry>>();
+
+  for (const auto& path : package_files) {
+    content_installation_status->push_back({path});
+  }
+
+  for (auto& entry : *content_installation_status) {
+    emulator_->ProcessContentPackageHeader(entry.path_, entry);
+    entry.data_installation_path_ = extract_dir;
+    entry.header_installation_path_ = "";
+  }
+
+  auto installation_thread = std::thread([this, content_installation_status] {
+    for (auto& entry : *content_installation_status) {
+      emulator_->ExtractContentPackage(entry.path_, entry);
+    }
+  });
+  installation_thread.detach();
+
+  new ContentInstallDialog(imgui_drawer_.get(), *this,
+                           content_installation_status);
 }
 
 void EmulatorWindow::DetachProfileConfigDialog(ProfileConfigDialog* dialog) {
@@ -1881,7 +2112,9 @@ xe::X_STATUS EmulatorWindow::RunTitle(const std::filesystem::path& path_to_file)
 
   auto result = emulator_->LaunchPath(abs_path);
 
-  imgui_drawer_.get()->ClearDialogs();
+  disable_hotkeys_ = false;
+
+  ClearDialogs();
 
   if (result) {
     XELOGE("Failed to launch target: {:08X}", result);
@@ -1977,11 +2210,11 @@ void EmulatorWindow::AddRecentlyLaunchedTitle(
   }
 
   // Check if game is already on list and pop it to front
-  auto entry_index = std::find_if(recently_launched_titles_.cbegin(),
-                                  recently_launched_titles_.cend(),
-                                  [&title_name](const RecentTitleEntry& entry) {
-                                    return entry.title_name == title_name;
-                                  });
+  auto entry_index =
+      std::ranges::find_if(std::as_const(recently_launched_titles_),
+                           [&title_name](const RecentTitleEntry& entry) {
+                             return entry.title_name == title_name;
+                           });
   if (entry_index != recently_launched_titles_.cend()) {
     recently_launched_titles_.erase(entry_index);
   }
@@ -2014,6 +2247,31 @@ void EmulatorWindow::AddRecentlyLaunchedTitle(
                      std::ofstream::trunc);
   file << toml_table;
   file.close();
+}
+
+void EmulatorWindow::ClearDialogs() {
+  if (profile_config_dialog_) {
+    profile_config_dialog_.reset();
+  }
+
+  if (display_config_dialog_) {
+    display_config_dialog_.reset();
+  }
+
+  if (console_settings_dialog_) {
+    console_settings_dialog_.reset();
+  }
+
+  if (content_list_dialog_) {
+    content_list_dialog_.reset();
+  }
+
+  if (xmp_config_dialog_) {
+    xmp_config_dialog_.reset();
+  }
+
+  imgui_drawer_.get()->ClearDialogs();
+  emulator_->kernel_state()->xam_state()->is_xam_dialog_present_.store(false);
 }
 
 #if XE_PLATFORM_WINRT

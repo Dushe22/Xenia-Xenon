@@ -112,7 +112,7 @@ project("xenia-app")
     links({
       "xenia-apu-xaudio2",
       "xenia-gpu-d3d12",
-      "xenia-hid-winkey",
+      "xenia-hid-keyboard",
       "xenia-hid-xinput",
       "xenia-ui-d3d12",
     })

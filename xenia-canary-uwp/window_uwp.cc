@@ -68,7 +68,7 @@ bool UWPWindow::OpenImpl() {
   }
 
   WindowDestructionReceiver destruction_receiver(this);
-  OnActualSizeUpdate(width, height,
+  OnActualSizeUpdate(width, height, WindowResizeAction::kManual,
                      destruction_receiver);  
   return true; 
 }

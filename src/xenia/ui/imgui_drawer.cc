@@ -45,6 +45,16 @@
 
 #if XE_PLATFORM_LINUX
 #include <fontconfig/fontconfig.h>
+
+#include "xenia/base/mapped_memory.h"
+
+// Dear ImGui compiles its stb_truetype as static, so this file needs its own
+// copy to check a font before handing it to the atlas.
+#define STBTT_STATIC
+#define STB_TRUETYPE_IMPLEMENTATION
+#include "third_party/imgui/imstb_truetype.h"
+
+#include "embedded_font.h"
 #endif
 
 #ifdef XE_PLATFORM_LINUX
@@ -351,8 +361,7 @@ ImGuiDrawer::~ImGuiDrawer() {
 void ImGuiDrawer::AddDialog(ImGuiDialog* dialog) {
   assert_not_null(dialog);
   // Check if already added.
-  if (std::find(dialogs_.cbegin(), dialogs_.cend(), dialog) !=
-      dialogs_.cend()) {
+  if (std::ranges::find(std::as_const(dialogs_), dialog) != dialogs_.cend()) {
     return;
   }
   if (dialogs_.empty() && !IsDrawingDialogs()) {
@@ -370,7 +379,7 @@ void ImGuiDrawer::AddDialog(ImGuiDialog* dialog) {
 
 void ImGuiDrawer::RemoveDialog(ImGuiDialog* dialog) {
   assert_not_null(dialog);
-  auto it = std::find(dialogs_.cbegin(), dialogs_.cend(), dialog);
+  auto it = std::ranges::find(std::as_const(dialogs_), dialog);
   if (it == dialogs_.cend()) {
     return;
   }
@@ -388,7 +397,7 @@ void ImGuiDrawer::RemoveDialog(ImGuiDialog* dialog) {
 void ImGuiDrawer::AddNotification(ImGuiNotification* dialog) {
   assert_not_null(dialog);
   // Check if already added.
-  if (std::find(notifications_.cbegin(), notifications_.cend(), dialog) !=
+  if (std::ranges::find(std::as_const(notifications_), dialog) !=
       notifications_.cend()) {
     return;
   }
@@ -402,7 +411,7 @@ void ImGuiDrawer::AddNotification(ImGuiNotification* dialog) {
 
 void ImGuiDrawer::RemoveNotification(ImGuiNotification* dialog) {
   assert_not_null(dialog);
-  auto it = std::find(notifications_.cbegin(), notifications_.cend(), dialog);
+  auto it = std::ranges::find(std::as_const(notifications_), dialog);
   if (it == notifications_.cend()) {
     return;
   }
@@ -430,6 +439,7 @@ void ImGuiDrawer::Initialize() {
 
   auto& io = ImGui::GetIO();
   io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
+  io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 
   const float font_size = std::max((float)cvars::font_size, 8.f);
   const float title_font_size = font_size + 6.f;
@@ -611,6 +621,7 @@ void ImGuiDrawer::SetupNotificationTextures() {
   }
 }
 
+// https://everythingfonts.com/unicode/maps
 static constexpr ImWchar font_glyph_ranges[] = {
     0x0020, 0x00FF,  // Basic Latin + Latin Supplement
     0x0100, 0x024F,  // Extended Latin
@@ -618,8 +629,13 @@ static constexpr ImWchar font_glyph_ranges[] = {
     0x0400, 0x04FF,  // Cyrillic
     0x2000, 0x206F,  // General Punctuation
     0x2070, 0x209F,  // Superscripts & Subscripts
+    0x20A0, 0x20CF,  // Currency Symbols
     0x2100, 0x214F,  // Letterlike Symbols
     0x2150, 0x218F,  // Number Forms
+    0x2500, 0x257F,  // Box Drawing
+    0x2580, 0x259F,  // Block Elements
+    0x25A0, 0x25FF,  // Geometric Shapes
+    0x2600, 0x26FF,  // Miscellaneous Symbols
     0,
 };
 
@@ -685,6 +701,20 @@ bool ImGuiDrawer::LoadWindowsFont(ImGuiIO& io, ImFontConfig& font_config,
   return false;
 }
 
+#if XE_PLATFORM_LINUX
+// Whether stb_truetype can parse a font, checked before the font is merged
+// into the real atlas, where a failure would take the base font down with it
+// (and trip an IM_ASSERT in debug builds).
+static bool IsFontLoadable(const uint8_t* data, size_t size) {
+  if (!data || size < 12) {
+    return false;
+  }
+  stbtt_fontinfo font_info = {};
+  const int font_offset = stbtt_GetFontOffsetForIndex(data, 0);
+  return font_offset >= 0 && stbtt_InitFont(&font_info, data, font_offset);
+}
+#endif
+
 bool ImGuiDrawer::LoadJapaneseFont(ImGuiIO& io, float font_size) {
 #if XE_PLATFORM_WIN32
   PWSTR fonts_dir;
@@ -713,7 +743,28 @@ bool ImGuiDrawer::LoadJapaneseFont(ImGuiIO& io, float font_size) {
 #endif
 
 #if XE_PLATFORM_LINUX
-  // On Linux, find and merge CJK font using fontconfig
+  // Prefer the bundled M PLUS 1p, a TrueType font stb_truetype can load.
+  {
+    void* jp_font_data = const_cast<unsigned char*>(
+        xe::ui::embedded_font::MPLUS1p_Regular_ttf_data);
+    const int jp_font_size =
+        static_cast<int>(xe::ui::embedded_font::MPLUS1p_Regular_ttf_size);
+    if (IsFontLoadable(xe::ui::embedded_font::MPLUS1p_Regular_ttf_data,
+                       xe::ui::embedded_font::MPLUS1p_Regular_ttf_size)) {
+      ImFontConfig jp_font_config;
+      jp_font_config.FontDataOwnedByAtlas = false;
+      jp_font_config.MergeMode = true;
+      jp_font_config.OversampleH = jp_font_config.OversampleV = 2;
+      jp_font_config.PixelSnapH = true;
+      io.Fonts->AddFontFromMemoryTTF(jp_font_data, jp_font_size, font_size,
+                                     &jp_font_config,
+                                     io.Fonts->GetGlyphRangesJapanese());
+      return true;
+    }
+    XELOGW("Bundled CJK font cannot be loaded; trying fontconfig");
+  }
+
+  // Fall back to a system CJK font found with fontconfig
   FcConfig* config = FcInitLoadConfigAndFonts();
   if (!config) {
     XELOGW(
@@ -727,6 +778,13 @@ bool ImGuiDrawer::LoadJapaneseFont(ImGuiIO& io, float font_size) {
   FcCharSet* charset = FcCharSetCreate();
   FcCharSetAddChar(charset, 0x4E00);  // Add a CJK character to the charset
   FcPatternAddCharSet(pattern, FC_CHARSET, charset);
+  // Dear ImGui rasterises with stb_truetype, which cannot parse CFF-outline
+  // OpenType fonts or variable-font collections. Fedora's default CJK match
+  // is NotoSansCJK-VF.ttc, exactly that, and one unloadable font fails the
+  // whole atlas build rather than just its own glyphs. Ask fontconfig for
+  // TrueType outlines only.
+  FcPatternAddString(pattern, FC_FONTFORMAT,
+                     reinterpret_cast<const FcChar8*>("TrueType"));
 
   // Configure the search
   FcConfigSubstitute(config, pattern, FcMatchPattern);
@@ -743,14 +801,22 @@ bool ImGuiDrawer::LoadJapaneseFont(ImGuiIO& io, float font_size) {
       const char* font_path = reinterpret_cast<const char*>(file);
 
       if (std::filesystem::exists(font_path)) {
-        ImFontConfig jp_font_config;
-        jp_font_config.MergeMode = true;
-        jp_font_config.OversampleH = jp_font_config.OversampleV = 2;
-        jp_font_config.PixelSnapH = true;
+        auto font_data =
+            MappedMemory::Open(font_path, MappedMemory::Mode::kRead);
+        if (font_data && IsFontLoadable(font_data->data(), font_data->size())) {
+          ImFontConfig jp_font_config;
+          jp_font_config.MergeMode = true;
+          jp_font_config.OversampleH = jp_font_config.OversampleV = 2;
+          jp_font_config.PixelSnapH = true;
 
-        io.Fonts->AddFontFromFileTTF(font_path, font_size, &jp_font_config,
-                                     io.Fonts->GetGlyphRangesJapanese());
-        success = true;
+          io.Fonts->AddFontFromFileTTF(font_path, font_size, &jp_font_config,
+                                       io.Fonts->GetGlyphRangesJapanese());
+          XELOGI("Using CJK font {}", font_path);
+          success = true;
+        } else {
+          XELOGW("CJK font {} cannot be loaded by stb_truetype; skipping",
+                 font_path);
+        }
       }
     }
     FcPatternDestroy(font);
@@ -836,7 +902,7 @@ void ImGuiDrawer::SetImmediateDrawer(ImmediateDrawer* new_immediate_drawer) {
   if (immediate_drawer_) {
     GetIO().Fonts->TexID = reinterpret_cast<ImTextureID>(nullptr);
     font_texture_.reset();
-
+    locked_achievement_icon_.reset();
     notification_icon_textures_.clear();
   }
   immediate_drawer_ = new_immediate_drawer;
@@ -1150,7 +1216,7 @@ void ImGuiDrawer::OnKeyUp(KeyEvent& e) { OnKey(e, false); }
 void ImGuiDrawer::OnKeyChar(KeyEvent& e) {
   auto& io = GetIO();
   // TODO(Triang3l): Accept the Unicode character.
-  unsigned int character = static_cast<unsigned int>(e.virtual_key());
+  unsigned int character = static_cast<unsigned int>(e.unicode());
   if (character > 0 && character < 0x10000) {
     io.AddInputCharacter(character);
     e.set_handled(true);

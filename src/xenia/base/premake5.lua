@@ -12,6 +12,7 @@ project("xenia-base")
   removefiles({
     "console_app_main_*.cc",
     "main_init_*.cc",
+    "*_arm64.cc",
   })
   files({
     "debug_visualizers.natvis",

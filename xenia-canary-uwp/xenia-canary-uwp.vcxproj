@@ -308,6 +308,8 @@
   <ItemGroup>
     <ClCompile Include="..\src\xenia\app\emulator_window.cc" />
     <ClCompile Include="..\src\xenia\app\profile_dialogs.cc" />
+    <ClCompile Include="..\src\xenia\app\console_settings_dialog.cc" />
+    <ClCompile Include="..\src\xenia\app\content_list_dialog.cc" />
     <ClCompile Include="..\src\xenia\app\xenia_main.cc" />
     <ClCompile Include="App.cpp" />
     <ClCompile Include="pch.cpp">

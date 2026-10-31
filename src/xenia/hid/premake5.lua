@@ -8,7 +8,7 @@ project("xenia-hid")
   language("C++")
   links({
     "xenia-base",
-    "xenia-hid-skylander",
+    "xenia-hid-portal",
   })
   local_platform_files()
   removefiles({

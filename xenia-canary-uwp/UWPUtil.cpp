@@ -438,7 +438,7 @@ static bool TryExtractExecutionInfoFromXexData(
   for (uint32_t i = 0; i < header_count; ++i) {
     const auto& opt_header = header->headers[i];
     const uint32_t key = opt_header.key;
-    if (key != xe::XEX_HEADER_EXECUTION_INFO) {
+    if (key != ::XEX_HEADER_EXECUTION_INFO) {
       continue;
     }
 

@@ -52,6 +52,9 @@ DECLARE_bool(allow_plugins);
 static constexpr uint8_t xe_xex1_retail_key[16] = {
     0xA2, 0x6C, 0x10, 0xF7, 0x1F, 0xD9, 0x35, 0xE9,
     0x8B, 0x99, 0x92, 0x2C, 0xE9, 0x32, 0x15, 0x72};
+static constexpr uint8_t xe_xex1_devkit_key[16] = {
+    0xA8, 0xB0, 0x05, 0x12, 0xED, 0xE3, 0x63, 0x8D,
+    0xC6, 0x58, 0xB3, 0x10, 0x1F, 0x9F, 0x50, 0xD1};
 static constexpr uint8_t xe_xex2_retail_key[16] = {
     0x20, 0xB1, 0x85, 0xA5, 0x9D, 0x28, 0xFD, 0xC3,
     0x40, 0x58, 0x3F, 0xBB, 0x08, 0x96, 0xBF, 0x91};
@@ -85,7 +88,7 @@ namespace cpu {
 using xe::kernel::KernelState;
 
 XexModule::XexModule(Processor* processor, KernelState* kernel_state)
-    : Module(processor), processor_(processor), kernel_state_(kernel_state) {}
+    : Module(processor), kernel_state_(kernel_state) {}
 
 XexModule::~XexModule() {}
 
@@ -232,7 +235,12 @@ int XexModule::ApplyPatch(XexModule* module) {
   xex2_opt_delta_patch_descriptor* patch_header = nullptr;
   GetOptHeader(XEX_HEADER_DELTA_PATCH_DESCRIPTOR,
                reinterpret_cast<void**>(&patch_header));
-  assert_not_null(patch_header);
+  if (!patch_header) {
+    // is_patch() only checks the module flags, so a malformed patch file can
+    // still lack the descriptor.
+    XELOGE("XEX patch has no delta patch descriptor");
+    return 1;
+  }
 
   uint32_t size = module->xex_header()->header_size;
   if (patch_header->delta_headers_source_offset > size) {
@@ -657,12 +665,21 @@ int XexModule::ReadImageBasicCompressed(const void* xex_addr,
     const uint32_t data_size = comp_info.blocks[n].data_size;
     const uint32_t zero_size = comp_info.blocks[n].zero_size;
 
+    // Block sizes come from the file. Decryption works in 16-byte blocks.
+    const size_t copy_size =
+        opt_file_format_info()->encryption_type == XEX_ENCRYPTION_NORMAL
+            ? xe::align<size_t>(data_size, 16)
+            : data_size;
+    const size_t source_offset = size_t(p - source_buffer);
+    const size_t dest_offset = size_t(d - buffer);
+    if (copy_size > exe_length - source_offset || dest_offset > total_size ||
+        copy_size > total_size - dest_offset) {
+      XELOGE("XEX basic compression block {} is out of bounds", n);
+      return 1;
+    }
+
     switch (opt_file_format_info()->encryption_type) {
       case XEX_ENCRYPTION_NONE:
-        if (data_size > uncompressed_size - (d - buffer)) {
-          // Overflow.
-          return 1;
-        }
         memcpy(d, p, data_size);
         break;
       case XEX_ENCRYPTION_NORMAL: {
@@ -882,32 +899,52 @@ int XexModule::ReadPEHeaders() {
 }
 
 void XexModule::ReadSecurityInfo() {
-  if (xex_format_ == kFormatXex1) {
-    const xex1_security_info* xex1_sec_info =
-        reinterpret_cast<const xex1_security_info*>(
-            GetSecurityInfo(xex_header()));
+  switch (xex_format_) {
+    case kFormatXex25: {
+      const xex25_security_info* xex25_sec_info =
+          reinterpret_cast<const xex25_security_info*>(
+              GetSecurityInfo(xex_header()));
 
-    security_info_.rsa_signature = xex1_sec_info->rsa_signature;
-    security_info_.aes_key = xex1_sec_info->aes_key;
-    security_info_.image_size = xex1_sec_info->image_size;
-    security_info_.image_flags = xex1_sec_info->image_flags;
-    security_info_.export_table = xex1_sec_info->export_table;
-    security_info_.load_address = xex1_sec_info->load_address;
-    security_info_.page_descriptor_count = xex1_sec_info->page_descriptor_count;
-    security_info_.page_descriptors = xex1_sec_info->page_descriptors;
-  } else if (xex_format_ == kFormatXex2) {
-    const xex2_security_info* xex2_sec_info =
-        reinterpret_cast<const xex2_security_info*>(
-            GetSecurityInfo(xex_header()));
+      security_info_.rsa_signature = xex25_sec_info->rsa_signature;
+      security_info_.aes_key = xex25_sec_info->aes_key;
+      security_info_.image_size = xex25_sec_info->image_size;
+      security_info_.image_flags = xex25_sec_info->image_flags;
+      security_info_.export_table = xex25_sec_info->export_table;
+      security_info_.load_address = xex25_sec_info->load_address;
+      security_info_.page_descriptor_count =
+          xex25_sec_info->page_descriptor_count;
+      security_info_.page_descriptors = xex25_sec_info->page_descriptors;
+    } break;
+    case kFormatXex1: {
+      const xex1_security_info* xex1_sec_info =
+          reinterpret_cast<const xex1_security_info*>(
+              GetSecurityInfo(xex_header()));
 
-    security_info_.rsa_signature = xex2_sec_info->rsa_signature;
-    security_info_.aes_key = xex2_sec_info->aes_key;
-    security_info_.image_size = xex2_sec_info->image_size;
-    security_info_.image_flags = xex2_sec_info->image_flags;
-    security_info_.export_table = xex2_sec_info->export_table;
-    security_info_.load_address = xex2_sec_info->load_address;
-    security_info_.page_descriptor_count = xex2_sec_info->page_descriptor_count;
-    security_info_.page_descriptors = xex2_sec_info->page_descriptors;
+      security_info_.rsa_signature = xex1_sec_info->rsa_signature;
+      security_info_.aes_key = xex1_sec_info->aes_key;
+      security_info_.image_size = xex1_sec_info->image_size;
+      security_info_.image_flags = xex1_sec_info->image_flags;
+      security_info_.export_table = xex1_sec_info->export_table;
+      security_info_.load_address = xex1_sec_info->load_address;
+      security_info_.page_descriptor_count =
+          xex1_sec_info->page_descriptor_count;
+      security_info_.page_descriptors = xex1_sec_info->page_descriptors;
+    } break;
+    case kFormatXex2: {
+      const xex2_security_info* xex2_sec_info =
+          reinterpret_cast<const xex2_security_info*>(
+              GetSecurityInfo(xex_header()));
+
+      security_info_.rsa_signature = xex2_sec_info->rsa_signature;
+      security_info_.aes_key = xex2_sec_info->aes_key;
+      security_info_.image_size = xex2_sec_info->image_size;
+      security_info_.image_flags = xex2_sec_info->image_flags;
+      security_info_.export_table = xex2_sec_info->export_table;
+      security_info_.load_address = xex2_sec_info->load_address;
+      security_info_.page_descriptor_count =
+          xex2_sec_info->page_descriptor_count;
+      security_info_.page_descriptors = xex2_sec_info->page_descriptors;
+    } break;
   }
 }
 
@@ -915,12 +952,33 @@ bool XexModule::Load(const std::string_view name, const std::string_view path,
                      const void* xex_addr, size_t xex_length) {
   auto src_header = reinterpret_cast<const xex2_header*>(xex_addr);
 
-  if (src_header->magic == kXEX1Signature) {
-    xex_format_ = kFormatXex1;
-  } else if (src_header->magic == kXEX2Signature) {
-    xex_format_ = kFormatXex2;
-  } else {
-    return false;
+  switch (src_header->magic) {
+    case kXEX0Signature:
+      XELOGE("XEX0 format not supported");
+      return false;
+      break;
+    case kXEXQSignature:
+      XELOGE("XEX? format not supported");
+      return false;
+      break;
+    case kXEXHSignature:
+      XELOGE("XEX- format not supported");
+      return false;
+      break;
+    case kXEX25Signature:
+      xex_format_ = kFormatXex25;
+      XELOGI("Loading XEX%");
+      break;
+    case kXEX1Signature:
+      xex_format_ = kFormatXex1;
+      XELOGI("Loading XEX1");
+      break;
+    case kXEX2Signature:
+      xex_format_ = kFormatXex2;
+      break;
+    default:
+      XELOGE("XEX format not supported");
+      return false;
   }
 
   assert_false(loaded_);
@@ -939,8 +997,9 @@ bool XexModule::Load(const std::string_view name, const std::string_view path,
   // back to xex_security_info otherwise
   base_address_ = xex_security_info()->load_address;
   xe::be<uint32_t>* base_addr_opt = nullptr;
-  if (GetOptHeader(XEX_HEADER_IMAGE_BASE_ADDRESS, &base_addr_opt))
+  if (GetOptHeader(XEX_HEADER_IMAGE_BASE_ADDRESS, &base_addr_opt)) {
     base_address_ = *base_addr_opt;
+  }
 
   // Setup debug info.
   name_ = name;
@@ -955,13 +1014,23 @@ bool XexModule::Load(const std::string_view name, const std::string_view path,
 
     result_code = ReadImage(xex_addr, xex_length, xe_xex2_devkit_key);
     if (result_code) {
-      XELOGE("XEX load failed with code {}, trying with xex1 encryption key...",
-             result_code);
+      XELOGE(
+          "XEX load failed with code {}, trying with xex1 retail encryption "
+          "key...",
+          result_code);
 
       result_code = ReadImage(xex_addr, xex_length, xe_xex1_retail_key);
       if (result_code) {
-        XELOGE("XEX load failed with code {}", result_code);
-        return false;
+        XELOGE(
+            "XEX load failed with code {}, trying with xex1 devkit encryption "
+            "key...",
+            result_code);
+
+        result_code = ReadImage(xex_addr, xex_length, xe_xex1_devkit_key);
+        if (result_code) {
+          XELOGE("XEX load failed with code {}", result_code);
+          return false;
+        }
       }
     }
   }
@@ -1372,20 +1441,20 @@ void XexInfoCache::Init(XexModule* xexmod) {
 
   auto try_open = [this, &infocache_path, num_codebytes]() {
     bool did_exist = true;
+    const size_t file_size = sizeof(InfoCacheFlagsHeader) +
+                             (sizeof(InfoCacheFlags) * (num_codebytes / 4));
 
     if (!std::filesystem::exists(infocache_path)) {
       xe::filesystem::CreateEmptyFile(infocache_path);
+      std::filesystem::resize_file(infocache_path, file_size);
       did_exist = false;
     }
 
     // todo: prepopulate with stuff from pdata, dll exports
-
-    this->executable_addr_flags_ = std::move(xe::MappedMemory::Open(
+    this->executable_addr_flags_ = MappedMemory::Open(
         infocache_path, xe::MappedMemory::Mode::kReadWrite, 0,
-        sizeof(InfoCacheFlagsHeader) +
-            (sizeof(InfoCacheFlags) *
-             (num_codebytes /
-              4))));  // one infocacheflags entry for each PPC instr-sized addr
+        file_size);  // one infocacheflags entry for each PPC instr-sized addr
+
     return did_exist;
   };
 

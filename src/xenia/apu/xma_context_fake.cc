@@ -87,9 +87,9 @@ bool XmaContextFake::Work() {
   // We don't have enough space to even make one pass
   if (minimum_subframe_decode_count >
       remaining_subframe_blocks_in_output_buffer_) {
-    XELOGD("XmaContextFake {}: No space for subframe decoding {}/{}!", id(),
-           minimum_subframe_decode_count,
-           remaining_subframe_blocks_in_output_buffer_);
+    XELOGAPU("XmaContextFake {}: No space for subframe decoding {}/{}!", id(),
+             minimum_subframe_decode_count,
+             remaining_subframe_blocks_in_output_buffer_);
     data.Store(context_ptr);
     return true;
   }
@@ -137,17 +137,6 @@ void XmaContextFake::Enable() {
 
   data.Store(context_ptr);
   set_is_enabled(true);
-}
-
-bool XmaContextFake::Block(bool poll) {
-  if (!lock_.try_lock()) {
-    if (poll) {
-      return false;
-    }
-    lock_.lock();
-  }
-  lock_.unlock();
-  return true;
 }
 
 void XmaContextFake::Clear() {

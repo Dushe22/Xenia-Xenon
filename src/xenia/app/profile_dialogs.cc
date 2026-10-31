@@ -208,7 +208,7 @@ void NoProfileDialog::OnDraw(ImGuiIO& io) {
 
   if (should_close) {
     emulator_window_->SetHotkeysState(true);
-    delete this;
+    Close();
     return;
   }
 }
@@ -386,7 +386,7 @@ void ProfileConfigDialog::OnDraw(ImGuiIO& io) {
   
   // Profile list with proper rendering
   for (auto& [xuid, account] : *profiles) {
-      ImGui::PushID(static_cast<int>(xuid));
+      ImGui::PushID(fmt::format("{:016X}", xuid).c_str());
 
       const uint8_t user_index =
           profile_manager->GetUserIndexAssignedToProfile(xuid);
@@ -863,7 +863,7 @@ void TitleListUI::OnDraw(ImGuiIO& io) {
   ImGui::End();
 
   if (should_close) {
-    delete this;
+    Close();
   }
   return;
 }

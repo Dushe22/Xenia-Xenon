@@ -128,7 +128,7 @@ bool TraceViewer::Setup() {
   // Create the emulator but don't initialize so we can setup the window.
   emulator_ = std::make_unique<Emulator>("", "", "", "");
   X_STATUS result = emulator_->Setup(
-      window_.get(), nullptr, false, nullptr,
+      window_.get(), nullptr, false, true, nullptr,
       [this]() { return CreateGraphicsSystem(); }, nullptr);
   if (XFAILED(result)) {
     XELOGE("Failed to setup emulator: {:08X}", result);
@@ -1764,8 +1764,8 @@ void TraceViewer::DrawStateUI() {
             regs.GetVertexFetch(vertex_binding.fetch_constant);
         assert_true(fetch.endian == xenos::Endian::k8in32);
         char tree_root_id[32];
-        sprintf(tree_root_id, "#vertices_root_%d",
-                vertex_binding.fetch_constant);
+        snprintf(tree_root_id, sizeof(tree_root_id), "#vertices_root_%d",
+                 vertex_binding.fetch_constant);
         if (ImGui::TreeNode(tree_root_id, "vf%d: 0x%.8X (%db), %s",
                             vertex_binding.fetch_constant, fetch.address << 2,
                             fetch.size * 4,

@@ -10,6 +10,7 @@
 #ifndef XENIA_KERNEL_XFILE_H_
 #define XENIA_KERNEL_XFILE_H_
 
+#include <mutex>
 #include <string>
 
 #include "xenia/kernel/xiocompletion.h"
@@ -131,7 +132,8 @@ class XFile : public XObject {
  public:
   static const XObject::Type kObjectType = XObject::Type::File;
 
-  XFile(KernelState* kernel_state, vfs::File* file, bool synchronous);
+  XFile(KernelState* kernel_state, vfs::File* file, bool synchronous,
+        bool allow_buffering);
   ~XFile() override;
 
   vfs::Device* device() const { return file_->entry()->device(); }
@@ -142,8 +144,8 @@ class XFile : public XObject {
   const std::string& path() const { return file_->entry()->path(); }
   const std::string& name() const { return file_->entry()->name(); }
 
-  uint64_t position() const { return position_; }
-  void set_position(uint64_t value) { position_ = value; }
+  uint64_t position() const;
+  void set_position(uint64_t value);
 
   X_STATUS QueryDirectory(X_FILE_DIRECTORY_INFORMATION* out_info, size_t length,
                           const std::string_view file_name, bool restart);
@@ -153,15 +155,16 @@ class XFile : public XObject {
   // critical region).
   X_STATUS Read(uint32_t buffer_guess_address, uint32_t buffer_length,
                 uint64_t byte_offset, uint32_t* out_bytes_read,
-                uint32_t apc_context, bool notify_completion = true);
+                uint32_t apc_context, bool notify_completion = true,
+                bool* out_pending = nullptr);
 
   X_STATUS ReadScatter(uint32_t segments_guest_address, uint32_t length,
                        uint64_t byte_offset, uint32_t* out_bytes_read,
-                       uint32_t apc_context);
+                       uint32_t apc_context, bool* out_pending = nullptr);
 
   X_STATUS Write(uint32_t buffer_guess_address, uint32_t buffer_length,
                  uint64_t byte_offset, uint32_t* out_bytes_written,
-                 uint32_t apc_context);
+                 uint32_t apc_context, bool* out_pending = nullptr);
 
   X_STATUS SetLength(size_t length);
   X_STATUS Rename(const std::filesystem::path file_path);
@@ -174,6 +177,7 @@ class XFile : public XObject {
                                    ByteStream* stream);
 
   bool is_synchronous() const { return is_synchronous_; }
+  bool is_buffered() const { return allow_buffering_; }
 
  protected:
   void NotifyIOCompletionPorts(XIOCompletion::IONotification& notification);
@@ -185,9 +189,15 @@ class XFile : public XObject {
  private:
   XFile();
 
+  X_STATUS ReadInternal(uint32_t buffer_guest_address, uint32_t buffer_length,
+                        uint64_t byte_offset, uint32_t* out_bytes_read,
+                        uint32_t apc_context, bool notify_completion,
+                        bool* out_pending);
+
   vfs::File* file_ = nullptr;
   std::unique_ptr<threading::Event> async_event_ = nullptr;
 
+  mutable std::mutex file_lock_;
   std::mutex completion_port_lock_;
   std::vector<std::pair<uint32_t, object_ref<XIOCompletion>>> completion_ports_;
 
@@ -199,6 +209,7 @@ class XFile : public XObject {
   size_t find_index_ = 0;
 
   bool is_synchronous_ = false;
+  bool allow_buffering_ = false;
 };
 
 }  // namespace kernel

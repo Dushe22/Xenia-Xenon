@@ -59,6 +59,7 @@ class SigninUI final : public XamDialog {
 
   std::shared_ptr<xe::ui::ImmediateTexture> button_a_tex_;
   std::shared_ptr<xe::ui::ImmediateTexture> button_b_tex_;
+  bool valid_gamertag_ = false;
 };
 
 }  // namespace ui

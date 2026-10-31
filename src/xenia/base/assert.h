@@ -10,9 +10,13 @@
 #ifndef XENIA_BASE_ASSERT_H_
 #define XENIA_BASE_ASSERT_H_
 
-#include <assert.h>
+#include <cassert>
 
 #include "xenia/base/platform.h"
+
+#if !XE_PLATFORM_WIN32
+#include <csignal>
+#endif
 
 namespace xe {
 
@@ -47,7 +51,20 @@ namespace xe {
 #endif
 
 #else
+#if XE_PLATFORM_WIN32
 #define xenia_assert assert
+#else
+// Logs the failure, then breaks into an attached debugger, or otherwise asks
+// whether to abort or continue like the assertion dialog on Windows.
+void AssertFailed(const char* expression, const char* file, int line);
+
+#define xenia_assert(expr)                           \
+  do {                                               \
+    if (!(expr)) {                                   \
+      ::xe::AssertFailed(#expr, __FILE__, __LINE__); \
+    }                                                \
+  } while (0)
+#endif
 #endif
 #define __XENIA_EXPAND(x) x
 #define __XENIA_ARGC(...)                                                     \
