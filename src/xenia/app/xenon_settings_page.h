@@ -24,6 +24,8 @@
 #include "third_party/imgui/imgui.h"
 #include "xenia/base/cvar.h"
 #include "xenia/config.h"
+#include "xenia/kernel/kernel_state.h"
+#include "xenia/kernel/xconfig.h"
 
 namespace xe {
 namespace app {
@@ -53,6 +55,10 @@ struct Option {
   const char* secondary_label = nullptr;  // footer hint for Y
   std::function<std::string()> value_fn;  // text shown on the right
   std::string desc;                       // overrides cvar description
+  // Choice rows backed by something other than a cvar (e.g. XConfig).
+  std::function<std::string()> get;
+  std::function<void(const std::string&)> set;
+  const char* default_value = nullptr;
 };
 
 struct Category {
@@ -212,25 +218,46 @@ inline Option Text(const char* label, const char* cvar) {
   return o;
 }
 
+// Language stored in the console's XConfig (read by games via XAM).
+inline Option ConsoleLanguage() {
+  Option o;
+  o.label = "Console language";
+  o.kind = Kind::kChoice;
+  o.choices = {{"1", "English"},     {"2", "Japanese"},
+               {"3", "German"},      {"4", "French"},
+               {"5", "Spanish"},     {"6", "Italian"},
+               {"7", "Korean"},      {"8", "Traditional Chinese"},
+               {"9", "Portuguese"},  {"11", "Polish"},
+               {"12", "Russian"},    {"13", "Swedish"},
+               {"14", "Turkish"},    {"15", "Norwegian"},
+               {"16", "Dutch"},      {"17", "Simplified Chinese"}};
+  o.default_value = "1";
+  o.desc = "Language reported to games.";
+  o.get = []() -> std::string {
+    auto kernel_state = kernel::KernelState::shared();
+    if (!kernel_state || !kernel_state->xconfig()) return {};
+    return std::to_string(kernel_state->xconfig()->ReadSetting<uint32_t>(
+        kernel::XCONFIG_USER_CATEGORY, kernel::XCONFIG_USER_LANGUAGE));
+  };
+  o.set = [](const std::string& value) {
+    auto kernel_state = kernel::KernelState::shared();
+    if (!kernel_state || !kernel_state->xconfig()) return;
+    const uint32_t language =
+        xe::byte_swap(static_cast<uint32_t>(std::stoul(value)));
+    kernel_state->xconfig()->WriteSetting(kernel::XCONFIG_USER_CATEGORY,
+                                          kernel::XCONFIG_USER_LANGUAGE,
+                                          &language);
+  };
+  return o;
+}
+
 inline const std::vector<Category>& Categories() {
   static const std::vector<Category> categories = [] {
     std::vector<Category> c;
     c.push_back({"General",
                  {Toggle("Apply patches", "apply_patches"),
                   Toggle("Controller hotkeys", "controller_hotkeys"),
-                  Pick("Console language", "user_language",
-                       {{"1", "English"},
-                        {"2", "Japanese"},
-                        {"3", "German"},
-                        {"4", "French"},
-                        {"5", "Spanish"},
-                        {"6", "Italian"},
-                        {"7", "Korean"},
-                        {"8", "Traditional Chinese"},
-                        {"9", "Portuguese"},
-                        {"10", "Simplified Chinese"},
-                        {"11", "Polish"},
-                        {"12", "Russian"}})}});
+                  ConsoleLanguage()}});
     c.push_back(
         {"Graphics",
          {Range("Resolution scale", "draw_resolution_scale_x", 1, 3, 1,
@@ -607,7 +634,7 @@ inline const std::vector<Category>& Categories() {
     for (auto& cat : c) {
       cat.options.erase(
           std::remove_if(cat.options.begin(), cat.options.end(),
-                         [](const Option& o) { return !Find(o.cvar); }),
+                         [](const Option& o) { return !o.set && !Find(o.cvar); }),
           cat.options.end());
     }
     return c;
@@ -619,7 +646,7 @@ inline const std::vector<Category>& Categories() {
 // -----------------------------------------------------------
 
 inline int ChoiceIndex(const Option& o) {
-  const std::string cur = GetString(Find(o.cvar));
+  const std::string cur = o.get ? o.get() : GetString(Find(o.cvar));
   for (size_t i = 0; i < o.choices.size(); ++i) {
     if (cur == o.choices[i].value) return int(i);
   }
@@ -637,7 +664,7 @@ inline std::string ValueText(const Option& o) {
     }
     case Kind::kChoice: {
       const int i = ChoiceIndex(o);
-      return i >= 0 ? o.choices[i].label : GetString(v);
+      return i >= 0 ? o.choices[i].label : o.get ? o.get() : GetString(v);
     }
     case Kind::kRange: {
       double n = 0;
@@ -661,6 +688,14 @@ inline std::string ValueText(const Option& o) {
 inline void Commit() { config::SaveConfig(); }
 
 inline void Change(const Option& o, int dir) {
+  if (o.set) {
+    const int count = int(o.choices.size());
+    if (!count) return;
+    int i = ChoiceIndex(o);
+    i = i < 0 ? 0 : (i + dir + count) % count;
+    o.set(o.choices[i].value);
+    return;
+  }
   cvar::IConfigVar* v = Find(o.cvar);
   if (!v) return;
   switch (o.kind) {
@@ -697,6 +732,10 @@ inline void Change(const Option& o, int dir) {
 }
 
 inline void Reset(const Option& o) {
+  if (o.set) {
+    if (o.default_value) o.set(o.default_value);
+    return;
+  }
   if (auto v = Find(o.cvar)) v->ResetConfigValueToDefault();
   if (auto v = Find(o.cvar2)) v->ResetConfigValueToDefault();
   Commit();
