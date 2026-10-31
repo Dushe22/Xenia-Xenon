@@ -1,8 +1,9 @@
 #pragma once
 
-// Browser UI served by WebTransferServer at "/". Kept fully self-contained
-// (no CDN) so it works on a LAN without internet access. Split into several
-// raw string pieces to stay under MSVC's per-literal size limit.
+// Browser UI served by WebTransferServer at "/". Kept self-contained (no CDN)
+// so it works on a LAN without internet access; the font and logo come from
+// the package through /assets/. Split into several raw string pieces to stay
+// under MSVC's per-literal size limit.
 
 #include <string>
 
@@ -12,80 +13,106 @@ inline const std::string& GetWebTransferPage() {
   static const std::string page = std::string(R"XT(<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Xenia UWP Transfer</title>
+<title>Xenia Xenon Transfer</title>
+<link rel="icon" href="/assets/logo.png">
 <style>
-:root{--bg:#0f1210;--panel:#181d19;--line:#2a322c;--text:#e8efe9;--dim:#93a196;--accent:#6cc04a;--accent2:#4e9a32;--danger:#e0574f}
-@media (prefers-color-scheme: light){:root{--bg:#f3f6f3;--panel:#fff;--line:#d9e0da;--text:#17201a;--dim:#5d6b61;--accent:#3f8f22;--accent2:#2f6d18;--danger:#c23b33}}
+@font-face{font-family:Xenon;src:url(/assets/font-regular.ttf);font-weight:400}
+@font-face{font-family:Xenon;src:url(/assets/font-medium.ttf);font-weight:500}
+@font-face{font-family:Xenon;src:url(/assets/font-bold.ttf);font-weight:700}
+:root{--bg:#0a0c1a;--side:#0c0e20;--row:rgba(255,255,255,.04);--row2:rgba(255,255,255,.08);--line:rgba(255,255,255,.08);--text:#eef1ff;--dim:#a0a8cd;--faint:#6c7399;--v:#8460ff;--b:#4696ff;--grad:linear-gradient(90deg,#8460ff,#4696ff);--danger:#ff6b81;--ok:#5ee0a0}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
-header{padding:18px 16px 8px;max-width:1000px;margin:0 auto}
-h1{font-size:20px;margin:0 0 4px}
-.sub{color:var(--dim);font-size:13px}
-main{max-width:1000px;margin:0 auto;padding:0 16px 40px}
-.tabs{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
-.tab{border:1px solid var(--line);background:var(--panel);color:var(--text);padding:8px 14px;border-radius:999px;cursor:pointer;font:inherit}
-.tab.on{background:var(--accent);border-color:var(--accent);color:#fff}
-.tab small{opacity:.8;margin-left:6px}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:14px}
-.desc{color:var(--dim);font-size:13px;margin:0 0 10px}
-.bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-button.b{font:inherit;border:1px solid var(--line);background:transparent;color:var(--text);padding:7px 12px;border-radius:8px;cursor:pointer}
-button.b.p{background:var(--accent);border-color:var(--accent);color:#fff}
-button.b:hover{border-color:var(--accent)}
-button.b.d{color:var(--danger)}
-.crumbs{margin:10px 0 6px;font-size:14px;word-break:break-all}
-.crumbs a{color:var(--accent);cursor:pointer;text-decoration:none}
-#drop{border:2px dashed var(--line);border-radius:12px;padding:22px;text-align:center;color:var(--dim);margin-bottom:14px;transition:.15s}
-#drop.over{border-color:var(--accent);color:var(--text);background:rgba(108,192,74,.08)}
-table{width:100%;border-collapse:collapse}
-td{padding:8px 6px;border-top:1px solid var(--line);vertical-align:middle}
-td.n{word-break:break-all}
-td.n a{color:var(--text);cursor:pointer;font-weight:600;text-decoration:none}
-td.s{color:var(--dim);white-space:nowrap;text-align:right;font-variant-numeric:tabular-nums}
-td.a{white-space:nowrap;text-align:right}
-td.a button{padding:4px 8px;font-size:13px}
-.empty{color:var(--dim);padding:14px 6px}
-.q{font-size:13px}
-.qi{padding:6px 0;border-top:1px solid var(--line)}
+html,body{height:100%}
+body{margin:0;color:var(--text);font:15px/1.45 Xenon,system-ui,Segoe UI,Roboto,sans-serif;background:var(--bg);
+  background-image:radial-gradient(900px 600px at 85% -10%,rgba(132,96,255,.22),transparent 60%),radial-gradient(700px 500px at 100% 110%,rgba(70,150,255,.14),transparent 60%);background-attachment:fixed}
+.app{display:flex;min-height:100%}
+aside{width:300px;flex:none;background:var(--side);border-right:1px solid var(--line);padding:40px 22px;display:flex;flex-direction:column;gap:6px;position:sticky;top:0;height:100vh}
+.brand{display:flex;align-items:center;gap:14px;margin:0 6px 40px}
+.brand img{width:58px;height:58px}
+.brand b{display:block;font-size:26px;font-weight:700;letter-spacing:.32em}
+.brand small{display:block;font-size:11px;letter-spacing:.32em;color:var(--dim);margin-top:2px}
+.nav{all:unset;cursor:pointer;display:flex;align-items:center;gap:12px;padding:16px 22px;border-radius:999px;color:var(--dim);font-size:18px;font-weight:500;transition:background .2s,color .2s,box-shadow .2s}
+.nav::before{content:'';width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.6}
+.nav:hover{background:var(--row);color:var(--text)}
+.nav.on{background:var(--grad);color:#fff;box-shadow:0 8px 28px rgba(132,96,255,.35)}
+.nav.on::before{opacity:1}
+.nav span{display:flex;flex-direction:column;line-height:1.2}
+.nav small{font-size:12px;font-weight:400;opacity:.75}
+.foot{margin-top:auto;color:var(--faint);font-size:12px;padding:0 6px}
+main{flex:1;min-width:0;padding:40px 56px 56px}
+.top{display:flex;justify-content:flex-end;align-items:center;gap:22px;margin-bottom:34px}
+.chip{display:flex;align-items:center;gap:8px;padding:7px 16px;border-radius:999px;border:1px solid rgba(122,140,255,.55);background:rgba(122,140,255,.15);font-size:14px}
+.chip::before{content:'';width:8px;height:8px;border-radius:50%;background:#4fb0ff}
+#clock{font-size:26px;font-weight:500}
+h1{font-size:40px;font-weight:700;margin:0;line-height:1.1}
+.head{display:flex;justify-content:space-between;align-items:baseline;gap:16px}
+.count{color:var(--faint);font-size:13px;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap}
+.desc{color:var(--dim);margin:8px 0 22px;max-width:760px}
+.bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.btn{font:inherit;font-weight:500;border:1px solid var(--line);background:var(--row);color:var(--text);padding:10px 20px;border-radius:999px;cursor:pointer;transition:background .2s,border-color .2s}
+.btn:hover{background:var(--row2);border-color:rgba(132,96,255,.6)}
+.btn.p{background:var(--grad);border-color:transparent;color:#fff}
+.btn.p:hover{filter:brightness(1.1)}
+.btn.d{color:var(--danger)}
+.btn.s{padding:6px 14px;font-size:13px}
+.crumbs{margin:22px 0 12px;font-size:15px;color:var(--faint);word-break:break-all}
+.crumbs a{color:var(--dim);cursor:pointer}
+.crumbs a:last-child{color:var(--text)}
+#drop{border:1.5px dashed rgba(132,96,255,.45);border-radius:16px;padding:26px;text-align:center;color:var(--dim);margin-bottom:16px;background:rgba(132,96,255,.04);transition:.2s}
+#drop.over{border-color:var(--b);color:var(--text);background:rgba(70,150,255,.1)}
+.card{background:var(--row);border:1px solid var(--line);border-radius:16px;padding:16px 18px;margin-bottom:16px}
+#sum{font-size:13px;color:var(--dim);margin-bottom:8px}
+.qi{padding:8px 0;border-top:1px solid var(--line);font-size:13px}
 .qi:first-child{border-top:0}
 .qn{display:flex;justify-content:space-between;gap:8px}
 .qn span:first-child{word-break:break-all}
-.pb{height:6px;background:var(--line);border-radius:3px;overflow:hidden;margin-top:4px}
-.pb i{display:block;height:100%;width:0;background:var(--accent)}
+.pb{height:5px;background:var(--line);border-radius:3px;overflow:hidden;margin-top:6px}
+.pb i{display:block;height:100%;width:0;background:var(--grad)}
+.rows{display:flex;flex-direction:column;gap:8px}
+.r{display:flex;align-items:center;gap:14px;padding:14px 20px;border-radius:14px;background:var(--row);border:1px solid transparent;transition:background .15s,border-color .15s}
+.r:hover{background:var(--row2);border-color:rgba(132,96,255,.35)}
+.ic{width:34px;height:34px;flex:none;border-radius:10px;display:grid;place-items:center;font-size:12px;font-weight:700;color:#fff;background:rgba(255,255,255,.08)}
+.r.dir .ic{background:var(--grad)}
+.nm{flex:1;min-width:0;word-break:break-all;font-weight:500}
+.r.dir .nm{cursor:pointer}
+.sz{color:var(--dim);font-size:13px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.ac{display:flex;gap:6px;white-space:nowrap}
+.empty{color:var(--dim);padding:18px 20px}
 .err{color:var(--danger)}
-.ok{color:var(--accent)}
-#sum{font-size:13px;color:var(--dim);margin-bottom:6px}
-@media (max-width:600px){td.s{display:none}td.a button{padding:4px 6px}}
-</style></head><body>
-<header><h1>Xenia UWP &middot; File Transfer</h1>
-<div class="sub">Copy games and content into the console's internal storage. Keep the emulator open on the console while transferring.</div></header>
+.ok{color:var(--ok)}
+@media (max-width:860px){.app{flex-direction:column}aside{width:auto;height:auto;position:static;padding:20px 16px;flex-direction:row;flex-wrap:wrap;border-right:0;border-bottom:1px solid var(--line)}
+  .brand{width:100%;margin:0 0 10px}.nav{padding:10px 16px;font-size:15px}.foot{display:none}main{padding:20px 16px 40px}.top{margin-bottom:16px}h1{font-size:30px}.sz{display:none}.r{flex-wrap:wrap;padding:12px 14px}.nm{flex:1 1 60%}.ac{width:100%;justify-content:flex-end}}
+</style></head><body><div class="app">
+<aside><div class="brand"><img src="/assets/logo.png" alt=""><div><b>XENON</b><small>WEB TRANSFER</small></div></div>
+<div id="tabs" style="display:contents"></div>
+<div class="foot">Keep Xenon open on the console while transferring.</div></aside>
 <main>
-<div class="tabs" id="tabs"></div>
-<div class="card">
+<div class="top"><div class="chip">Transfer on</div><div id="clock"></div></div>
+<div class="head"><h1 id="title"></h1><div class="count" id="count"></div></div>
 <p class="desc" id="rootdesc"></p>
 <div class="bar">
-<button class="b p" id="bf">Upload files</button>
-<button class="b p" id="bd">Upload folder</button>
-<button class="b" id="bn">New folder</button>
-<button class="b" id="br">Refresh</button>
+<button class="btn p" id="bf">Upload files</button>
+<button class="btn p" id="bd">Upload folder</button>
+<button class="btn" id="bn">New folder</button>
+<button class="btn" id="br">Refresh</button>
 </div>
 <div class="crumbs" id="crumbs"></div>
-</div>
 <div id="drop">Drop files or whole game folders here</div>
 <div class="card" id="qcard" style="display:none">
-<div id="sum"></div><div class="q" id="queue"></div>
-<div class="bar" style="margin-top:8px"><button class="b d" id="bc">Cancel remaining</button></div>
+<div id="sum"></div><div id="queue"></div>
+<div class="bar" style="margin-top:10px"><button class="btn s d" id="bc">Cancel remaining</button></div>
 </div>
-<div class="card"><table><tbody id="list"></tbody></table></div>
+<div class="rows" id="list"></div>
 <input type="file" id="fi" multiple hidden>
 <input type="file" id="di" webkitdirectory multiple hidden>
-</main>
+</main></div>
 )XT") + std::string(R"XT(<script>
 let roots=[],root='',cwd='',queue=[],busy=false,cancel=false,xhr=null,doneBytes=0,totalBytes=0,startT=0;
 const $=id=>document.getElementById(id);
 const fmt=n=>{if(n<1024)return n+' B';const u=['KB','MB','GB','TB'];let i=-1;do{n/=1024;i++}while(n>=1024&&i<3);return n.toFixed(n<10?2:1)+' '+u[i]};
 const esc=s=>s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const join=(a,b)=>a?(b?a+'/'+b:a):b;
+const ext=n=>{const i=n.lastIndexOf('.');return i>0?n.slice(i+1,i+4).toUpperCase():'FILE'};
+function clock(){const d=new Date();$('clock').textContent=String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')}
 function qs(o){return Object.entries(o).map(([k,v])=>encodeURIComponent(k)+'='+encodeURIComponent(v)).join('&')}
 async function api(path,params,method){
   const r=await fetch('/api/'+path+'?'+qs(params),{method:method||'GET'});
@@ -96,9 +123,16 @@ async function api(path,params,method){
 async function loadInfo(){
   const j=await api('info',{});roots=j.roots;
   if(!root&&roots.length)root=roots[0].name;
-  $('tabs').innerHTML=roots.map(r=>'<button class="tab'+(r.name===root?' on':'')+'" data-r="'+esc(r.name)+'">'+esc(r.name)+'<small>'+fmt(r.free)+' free</small></button>').join('');
-  document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{root=b.dataset.r;cwd='';loadInfo();list()});
-  const cur=roots.find(r=>r.name===root);$('rootdesc').textContent=cur?cur.description:'';
+  $('tabs').innerHTML=roots.map(r=>'<button class="nav'+(r.name===root?' on':'')+'" data-r="'+esc(r.name)+'"><span>'+esc(r.name)+'<small>'+fmt(r.free)+' free</small></span></button>').join('');
+  document.querySelectorAll('.nav').forEach(b=>b.onclick=()=>{root=b.dataset.r;cwd='';loadInfo();list()});
+  const cur=roots.find(r=>r.name===root);$('title').textContent=root;$('rootdesc').textContent=cur?cur.description:'';
+}
+function row(e){
+  const n=esc(e.name);
+  return '<div class="r'+(e.dir?' dir':'')+'"><div class="ic">'+(e.dir?'DIR':esc(ext(e.name)))+'</div>'+
+    '<div class="nm"'+(e.dir?' data-d="'+n+'"':'')+'>'+n+'</div><div class="sz">'+(e.dir?'':fmt(e.size))+'</div><div class="ac">'+
+    (e.dir?'':'<button class="btn s" data-dl="'+n+'">Download</button>')+
+    '<button class="btn s" data-rn="'+n+'">Rename</button><button class="btn s d" data-rm="'+n+'">Delete</button></div></div>';
 }
 async function list(){
   const parts=cwd?cwd.split('/'):[];
@@ -107,11 +141,10 @@ async function list(){
   $('crumbs').innerHTML=c;
   document.querySelectorAll('#crumbs a').forEach(a=>a.onclick=()=>{cwd=a.dataset.p;list()});
   let j;
-  try{j=await api('list',{root,path:cwd})}catch(e){$('list').innerHTML='<tr><td class="empty err">'+esc(e.message)+'</td></tr>';return}
-  if(!j.entries.length){$('list').innerHTML='<tr><td class="empty">This folder is empty.</td></tr>';return}
-  $('list').innerHTML=j.entries.map(e=>'<tr><td class="n">'+(e.dir?'&#128193; <a data-d="'+esc(e.name)+'">'+esc(e.name)+'</a>':'&#128196; '+esc(e.name))+'</td><td class="s">'+(e.dir?'':fmt(e.size))+'</td><td class="a">'+
-    (e.dir?'':'<button class="b" data-dl="'+esc(e.name)+'">Download</button> ')+
-    '<button class="b" data-rn="'+esc(e.name)+'">Rename</button> <button class="b d" data-rm="'+esc(e.name)+'">Delete</button></td></tr>').join('');
+  try{j=await api('list',{root,path:cwd})}catch(e){$('count').textContent='';$('list').innerHTML='<div class="empty err">'+esc(e.message)+'</div>';return}
+  $('count').textContent=j.entries.length+' items';
+  if(!j.entries.length){$('list').innerHTML='<div class="empty">This folder is empty.</div>';return}
+  $('list').innerHTML=j.entries.map(row).join('');
   document.querySelectorAll('[data-d]').forEach(a=>a.onclick=()=>{cwd=join(cwd,a.dataset.d);list()});
   document.querySelectorAll('[data-dl]').forEach(b=>b.onclick=()=>{location.href='/api/download?'+qs({root,path:join(cwd,b.dataset.dl)})});
   document.querySelectorAll('[data-rn]').forEach(b=>b.onclick=async()=>{const n=prompt('New name',b.dataset.rn);if(!n||n===b.dataset.rn)return;try{await api('rename',{root,path:join(cwd,b.dataset.rn),to:n},'POST')}catch(e){alert(e.message)}list()});
@@ -127,6 +160,7 @@ function enqueue(items){
 }
 function summary(){const t=(Date.now()-startT)/1000||1;const left=queue.length+(busy?1:0);
   $('sum').textContent=(left?left+' file(s) left · ':'All done · ')+fmt(doneBytes)+' of '+fmt(totalBytes)+' · '+fmt(doneBytes/t)+'/s'}
+)XT") + std::string(R"XT(
 function next(){
   if(cancel){queue.forEach(it=>{it.el.querySelector('.st').innerHTML='<span class="err">cancelled</span>'});totalBytes-=queue.reduce((a,it)=>a+it.file.size,0);queue=[]}
   const it=queue.shift();
@@ -143,7 +177,6 @@ function next(){
   xhr.onerror=xhr.onabort=()=>{doneBytes+=it.file.size-last;st.innerHTML='<span class="err">failed</span>';next()};
   xhr.send(it.file);
 }
-)XT") + std::string(R"XT(
 async function walk(entry,prefix,out){
   if(entry.isFile){await new Promise(res=>entry.file(f=>{out.push({file:f,rel:prefix+f.name});res()},()=>res()));return}
   if(entry.isDirectory){const rd=entry.createReader();let batch;
@@ -166,7 +199,8 @@ $('bn').onclick=async()=>{const n=prompt('Folder name');if(!n)return;try{await a
 $('br').onclick=()=>{loadInfo();list()};
 $('bc').onclick=()=>{cancel=true;if(xhr)xhr.abort()};
 window.addEventListener('beforeunload',e=>{if(busy){e.preventDefault();e.returnValue=''}});
-loadInfo().then(list).catch(e=>{$('list').innerHTML='<tr><td class="empty err">'+esc(e.message)+'</td></tr>'});
+clock();setInterval(clock,10000);
+loadInfo().then(list).catch(e=>{$('list').innerHTML='<div class="empty err">'+esc(e.message)+'</div>'});
 </script></body></html>
 )XT");
   return page;

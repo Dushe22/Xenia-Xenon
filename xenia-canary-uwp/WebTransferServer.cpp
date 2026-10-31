@@ -14,6 +14,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <fstream>
 #include <map>
 #include <memory>
 #include <set>
@@ -144,6 +145,27 @@ void SendResponse(SOCKET s, int code, const std::string& content_type,
     << "Connection: close\r\n\r\n";
   SendAll(s, h.str());
   SendAll(s, body);
+}
+
+// Static files the page uses (Xenon font and logo), read from the package.
+bool SendAsset(SOCKET s, const std::string& name) {
+  static const std::map<std::string, std::pair<const char*, const char*>>
+      kAssets = {
+          {"logo.png", {"Assets/xenon-logo.png", "image/png"}},
+          {"font-regular.ttf",
+           {"Assets/fonts/SpaceGrotesk-Regular.ttf", "font/ttf"}},
+          {"font-medium.ttf",
+           {"Assets/fonts/SpaceGrotesk-Medium.ttf", "font/ttf"}},
+          {"font-bold.ttf", {"Assets/fonts/SpaceGrotesk-Bold.ttf", "font/ttf"}},
+      };
+  auto it = kAssets.find(name);
+  if (it == kAssets.end()) return false;
+  std::ifstream file(it->second.first, std::ios::binary);
+  if (!file) return false;
+  std::ostringstream body;
+  body << file.rdbuf();
+  SendResponse(s, 200, it->second.second, body.str());
+  return true;
 }
 
 void SendJson(SOCKET s, int code, const std::string& json) {
@@ -410,6 +432,10 @@ void WebTransferServer::HandleClient(uintptr_t client_socket) {
   if (p == "/" || p == "/index.html") {
     if (m != "GET") return SendError(s, 405, "Method not allowed");
     return SendResponse(s, 200, "text/html; charset=utf-8", GetWebTransferPage());
+  }
+  if (p.rfind("/assets/", 0) == 0 && m == "GET") {
+    if (!SendAsset(s, p.substr(8))) SendError(s, 404, "Not found");
+    return;
   }
   if (p == "/api/info" && m == "GET") return HandleInfo(client_socket, req);
   if (p == "/api/list" && m == "GET") return HandleList(client_socket, req);
