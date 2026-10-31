@@ -64,6 +64,9 @@
 #include "xenia-canary-uwp/UWPUtil.h"
 #include "xenia-canary-uwp/WinRTKeyboard.h"
 #include "xenia-canary-uwp/XeniaUWP.h"
+#include "xenia/ui/imgui_drawer.h"
+#include <cfloat>
+#include <ctime>
 #endif
 
 #include <limits>
@@ -142,7 +145,7 @@ DEFINE_string(ui_guide_image, "blades.png",
               "Guide panel image to display in the search overlay. Must be a PNG file in Assets/guide_images/.",
               "UI");
 
-DEFINE_string(ui_text_effect, "stroke_fill",
+DEFINE_string(ui_text_effect, "none",
               "Text effect to apply globally to all UI text. Options: shadow, lift, stroke_fill, glow, outline, double_shadow, bold, none.",
               "UI");
 
@@ -150,9 +153,13 @@ DEFINE_string(ui_text_color, "white",
               "Monochrome text color override for UI text. Options: white, black.",
               "UI");
 
-DEFINE_string(ui_border_color, "green",
-              "Accent color applied to UI borders, checkboxes, combo accents, and frontend headers. Options: green, purple, red, orange, blue, yellow, grey, black, white.",
+DEFINE_string(ui_border_color, "xenon",
+              "Accent color applied to UI borders, checkboxes, combo accents, and frontend headers. Options: xenon, green, purple, red, orange, blue, yellow, grey, black, white.",
               "UI");
+
+DEFINE_int32(ui_xenon_theme_version, 0,
+             "Internal: last Xenon theme migration applied to UI settings.",
+             "UI");
 
 DEFINE_double(ui_text_brightness, 1.0,
                 "Brightness multiplier applied to UI text.", "UI");
@@ -2081,12 +2088,35 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
   }
 
   float display_scale = ((float)io.DisplaySize.x / 1920.0f);
-  const float frontend_width = io.DisplaySize.x * 0.92f;
-  const float frontend_height = io.DisplaySize.y * 0.88f;
+
+  // One-time switch of existing installs to the Xenon look.
+  if (cvars::ui_xenon_theme_version < 1) {
+    auto set_string_cvar = [](const char* name, const char* value) {
+      auto it = cvar::ConfigVars->find(name);
+      if (it == cvar::ConfigVars->end()) return;
+      if (auto cv = dynamic_cast<cvar::ConfigVar<std::string>*>(it->second)) {
+        cv->SetConfigValue(value);
+      }
+    };
+    set_string_cvar("ui_border_color", "xenon");
+    set_string_cvar("ui_text_effect", "none");
+    auto it = cvar::ConfigVars->find("ui_xenon_theme_version");
+    if (it != cvar::ConfigVars->end()) {
+      if (auto cv = dynamic_cast<cvar::ConfigVar<int32_t>*>(it->second)) {
+        cv->SetConfigValue(1);
+      }
+    }
+    config::SaveConfig();
+  }
+
+  // Xenon shell: the page area sits between the top bar and the footer.
+  const float shell_margin_x = 80.0f * display_scale;
+  const float shell_top = 128.0f * display_scale;
+  const float shell_bottom = 104.0f * display_scale;
+  const float frontend_width = io.DisplaySize.x - shell_margin_x * 2.0f;
+  const float frontend_height = io.DisplaySize.y - shell_top - shell_bottom;
   ImGui::SetNextWindowSize(ImVec2(frontend_width, frontend_height));
-  ImGui::SetNextWindowPos(
-      ImVec2((io.DisplaySize.x - frontend_width) * 0.5f,
-             (io.DisplaySize.y - frontend_height) * 0.5f));
+  ImGui::SetNextWindowPos(ImVec2(shell_margin_x, shell_top));
 
   auto flags = ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoTitleBar |
                ImGuiWindowFlags_NoMove | ImGuiWindowFlags_AlwaysAutoResize;
@@ -2113,26 +2143,34 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
     // Channel 2: Interface overlay (top layer)
     // Channel 3: UI elements
     
-    // Always draw background as base layer (bottom layer)
+    // Base layer: deep navy gradient with soft xenon glows.
     frontend_splitter.SetCurrentChannel(frontend_draw_list, 0);
-    if (auto fallback_tex = GetOrCreateBackgroundFallback()) {
+    {
+      const ImVec2 ds = io.DisplaySize;
       frontend_draw_list->PushClipRectFullScreen();
-      frontend_draw_list->AddImage(
-          reinterpret_cast<ImTextureID>(fallback_tex.get()), ImVec2(0, 0),
-          io.DisplaySize);
+      frontend_draw_list->AddRectFilledMultiColor(
+          ImVec2(0.0f, 0.0f), ds, IM_COL32(10, 12, 26, 255),
+          IM_COL32(14, 12, 34, 255), IM_COL32(6, 8, 18, 255),
+          IM_COL32(6, 9, 20, 255));
+      auto add_glow = [&](ImVec2 center, float radius, int r, int g, int b,
+                          float strength) {
+        constexpr int kSteps = 28;
+        const int alpha = std::max(1, int(strength * 255.0f / kSteps));
+        for (int i = 0; i < kSteps; ++i) {
+          const float t = float(i) / float(kSteps);
+          frontend_draw_list->AddCircleFilled(
+              center, radius * (1.0f - t * 0.92f), IM_COL32(r, g, b, alpha), 72);
+        }
+      };
+      add_glow(ImVec2(ds.x * 0.70f, ds.y * 0.28f), ds.x * 0.42f, 122, 92, 255,
+               0.30f);
+      add_glow(ImVec2(ds.x * 0.98f, ds.y * 0.90f), ds.x * 0.34f, 56, 170, 255,
+               0.22f);
+      add_glow(ImVec2(ds.x * 0.05f, ds.y * 1.05f), ds.x * 0.30f, 96, 112, 255,
+               0.14f);
       frontend_draw_list->PopClipRect();
     }
-    
-    // Draw interface overlay on top if available (top layer)
-    frontend_splitter.SetCurrentChannel(frontend_draw_list, 2);
-    if (auto background_tex = GetOrCreateBackground()) {
-      frontend_draw_list->PushClipRectFullScreen();
-      frontend_draw_list->AddImage(
-          reinterpret_cast<ImTextureID>(background_tex.get()), ImVec2(0, 0),
-          io.DisplaySize);
-      frontend_draw_list->PopClipRect();
-    }
-    
+
     frontend_splitter.SetCurrentChannel(frontend_draw_list, 3);
 
     const int page_count = static_cast<int>(FrontendPage::kCount);
@@ -2224,7 +2262,7 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
                           ImGuiTableFlags_SizingStretchProp |
                               ImGuiTableFlags_NoSavedSettings,
                           ImGui::GetContentRegionAvail())) {
-      const float rail_width = std::max(100.0f, 118.0f * display_scale);
+      const float rail_width = 1.0f;
       ImGui::TableSetupColumn("left", ImGuiTableColumnFlags_WidthFixed,
                               rail_width);
       ImGui::TableSetupColumn("main", ImGuiTableColumnFlags_WidthStretch);
@@ -3137,200 +3175,430 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
           focus_game_row_by_index(0, false);
         }
 
-        ImVec2 main_page_min = ImGui::GetWindowPos();
-        ImVec2 main_page_max =
-            ImVec2(main_page_min.x + ImGui::GetWindowSize().x,
-                   main_page_min.y + ImGui::GetWindowSize().y);
-        if (selected_row && selected_row->has_metadata &&
-            !selected_row->metadata.background_path.empty()) {
-          // Check if dynamic game backgrounds are enabled
+        // ---- Xenon home: hero for the selected game + cover row ----------
+        const float s = display_scale;
+        const ImVec2 page_origin = ImGui::GetCursorScreenPos();
+        const ImVec2 page_size = ImGui::GetContentRegionAvail();
+        ImDrawList* page_draw_list = ImGui::GetWindowDrawList();
+        ImFont* ui_font = ImGui::GetFont();
+        ImFont* display_font = xe::ui::GetXenonDisplayFont();
+        if (!display_font) {
+          display_font = ui_font;
+        }
+        const ImU32 kTextColor = IM_COL32(238, 241, 255, 255);
+        const ImU32 kDimColor = IM_COL32(160, 168, 205, 255);
+        const ImU32 kFaintColor = IM_COL32(160, 168, 205, 150);
+
+        auto text_width = [](ImFont* font, float size, const std::string& t) {
+          return font->CalcTextSizeA(size, FLT_MAX, 0.0f, t.c_str()).x;
+        };
+        auto ellipsize = [&](ImFont* font, float size, std::string t,
+                             float max_w) {
+          if (text_width(font, size, t) <= max_w) return t;
+          while (!t.empty() && text_width(font, size, t + "...") > max_w) {
+            t.pop_back();
+          }
+          return t + "...";
+        };
+        auto draw_spaced = [&](ImFont* font, float size, ImVec2 pos, ImU32 col,
+                               const std::string& t, float spacing) {
+          char ch[2] = {0, 0};
+          for (char c : t) {
+            ch[0] = c;
+            page_draw_list->AddText(font, size, pos, col, ch, ch + 1);
+            pos.x += font->CalcTextSizeA(size, FLT_MAX, 0.0f, ch, ch + 1).x +
+                     spacing;
+          }
+          return pos.x;
+        };
+        auto to_upper = [](std::string t) {
+          for (char& c : t) c = char(std::toupper(static_cast<unsigned char>(c)));
+          return t;
+        };
+        auto draw_cover = [&](const std::string* art, ImVec2 mn, ImVec2 mx,
+                              float rounding, ImU32 tint,
+                              const std::string& fallback_title) {
+          std::shared_ptr<ui::ImmediateTexture> tex;
+          if (art) tex = GetOrCreateImageTexture(*art);
+          if (tex && tex->width > 0 && tex->height > 0) {
+            // Cover-fit: crop the texture to the card aspect ratio.
+            const float box_aspect = (mx.x - mn.x) / std::max(1.0f, mx.y - mn.y);
+            const float tex_aspect = float(tex->width) / float(tex->height);
+            ImVec2 uv0(0.0f, 0.0f), uv1(1.0f, 1.0f);
+            if (tex_aspect > box_aspect) {
+              const float u = box_aspect / tex_aspect;
+              uv0.x = (1.0f - u) * 0.5f;
+              uv1.x = 1.0f - uv0.x;
+            } else {
+              const float v = tex_aspect / box_aspect;
+              uv0.y = (1.0f - v) * 0.5f;
+              uv1.y = 1.0f - uv0.y;
+            }
+            page_draw_list->AddImageRounded(
+                reinterpret_cast<ImTextureID>(tex.get()), mn, mx, uv0, uv1,
+                tint, rounding);
+            return;
+          }
+          // No art yet: xenon gradient tile with the title's initial.
+          page_draw_list->AddRectFilled(mn, mx, IM_COL32(28, 32, 64, 255),
+                                        rounding);
+          page_draw_list->AddRectFilledMultiColor(
+              ImVec2(mn.x + rounding * 0.3f, mn.y + rounding * 0.3f),
+              ImVec2(mx.x - rounding * 0.3f, mx.y - rounding * 0.3f),
+              IM_COL32(122, 92, 255, 70), IM_COL32(56, 170, 255, 40),
+              IM_COL32(56, 170, 255, 20), IM_COL32(122, 92, 255, 50));
+          const std::string initial =
+              fallback_title.empty() ? "?" : to_upper(fallback_title.substr(0, 1));
+          const float isz = (mx.y - mn.y) * 0.42f;
+          const float iw = text_width(display_font, isz, initial);
+          page_draw_list->AddText(
+              display_font, isz,
+              ImVec2((mn.x + mx.x - iw) * 0.5f, (mn.y + mx.y - isz) * 0.5f),
+              IM_COL32(220, 226, 255, 200), initial.c_str());
+        };
+        auto get_backdrop_art = [](const GameListRow& row) -> const std::string* {
+          if (!row.has_metadata) return nullptr;
+          const auto& m = row.metadata;
+          if (!m.background_path.empty()) return &m.background_path;
+          if (!m.banner_path.empty()) return &m.banner_path;
+          if (!m.gallery_paths.empty()) return &m.gallery_paths.front();
+          return nullptr;
+        };
+        auto get_cover_art = [](const GameListRow& row) -> const std::string* {
+          if (!row.has_metadata) return nullptr;
+          if (!row.metadata.cover_path.empty()) return &row.metadata.cover_path;
+          if (!row.metadata.icon_path.empty()) return &row.metadata.icon_path;
+          return nullptr;
+        };
+
+        // Selected game's art as a dimmed full-screen backdrop (like Jadyx).
+        if (selected_row) {
           auto c_dynamic_bg = dynamic_cast<cvar::ConfigVar<bool>*>(
               cvar::ConfigVars->find("ui_enable_dynamic_game_backgrounds")->second);
-          bool enable_dynamic_bg = c_dynamic_bg ? c_dynamic_bg->GetTypedConfigValue() : true;
-          
-          if (enable_dynamic_bg) {
-            auto bg_tex =
-                GetOrCreateImageTexture(selected_row->metadata.background_path);
-            if (bg_tex) {
-              frontend_splitter.SetCurrentChannel(frontend_draw_list, 1);
-              frontend_draw_list->PushClipRect(main_page_min, main_page_max, true);
-              frontend_draw_list->AddImage(
-                  reinterpret_cast<ImTextureID>(bg_tex.get()), main_page_min,
-                  main_page_max);
-              frontend_draw_list->PopClipRect();
-              frontend_splitter.SetCurrentChannel(frontend_draw_list, 3);
+          const bool enable_dynamic_bg =
+              c_dynamic_bg ? c_dynamic_bg->GetTypedConfigValue() : true;
+          const std::string* backdrop = get_backdrop_art(*selected_row);
+          auto bg_tex = (enable_dynamic_bg && backdrop)
+                            ? GetOrCreateImageTexture(*backdrop)
+                            : nullptr;
+          if (bg_tex && bg_tex->width > 0 && bg_tex->height > 0) {
+            const ImVec2 ds = io.DisplaySize;
+            const float screen_aspect = ds.x / ds.y;
+            const float tex_aspect = float(bg_tex->width) / float(bg_tex->height);
+            ImVec2 uv0(0.0f, 0.0f), uv1(1.0f, 1.0f);
+            if (tex_aspect > screen_aspect) {
+              const float u = screen_aspect / tex_aspect;
+              uv0.x = (1.0f - u) * 0.5f;
+              uv1.x = 1.0f - uv0.x;
+            } else {
+              const float v = tex_aspect / screen_aspect;
+              uv0.y = (1.0f - v) * 0.5f;
+              uv1.y = 1.0f - uv0.y;
             }
+            frontend_splitter.SetCurrentChannel(frontend_draw_list, 1);
+            frontend_draw_list->PushClipRectFullScreen();
+            frontend_draw_list->AddImage(
+                reinterpret_cast<ImTextureID>(bg_tex.get()), ImVec2(0, 0), ds,
+                uv0, uv1, IM_COL32(255, 255, 255, 120));
+            // Fade to navy on the left (text side) and at the bottom (row).
+            frontend_draw_list->AddRectFilledMultiColor(
+                ImVec2(0, 0), ImVec2(ds.x * 0.75f, ds.y),
+                IM_COL32(8, 10, 22, 235), IM_COL32(8, 10, 22, 0),
+                IM_COL32(8, 10, 22, 0), IM_COL32(8, 10, 22, 235));
+            frontend_draw_list->AddRectFilledMultiColor(
+                ImVec2(0, ds.y * 0.45f), ds, IM_COL32(8, 10, 22, 0),
+                IM_COL32(8, 10, 22, 0), IM_COL32(6, 8, 18, 250),
+                IM_COL32(6, 8, 18, 250));
+            frontend_draw_list->PopClipRect();
+            frontend_splitter.SetCurrentChannel(frontend_draw_list, 3);
           }
         }
-
-        ImGui::Dummy(ImVec2(0.0f, 42.0f * display_scale));
 
         bool request_open_game_context_menu = false;
         bool request_launch_selected_game = false;
         std::string launch_game_path;
-        const float gamelist_bottom_lift = 25.0f * display_scale;
-        float content_height = ImGui::GetContentRegionAvail().y - gamelist_bottom_lift;
-        if (content_height < 120.0f) {
-          content_height = 120.0f;
+
+        const float card_w = 196.0f * s;
+        const float card_h = 274.0f * s;
+        const float card_gap = 26.0f * s;
+        const float card_label_h = 64.0f * s;
+        const float row_h = card_h + card_label_h + 16.0f * s;
+        const float section_h = 52.0f * s;
+        const float hero_h =
+            std::max(160.0f * s, page_size.y - row_h - section_h - 10.0f * s);
+
+        // Hero ---------------------------------------------------------------
+        {
+          float y = page_origin.y + std::max(0.0f, hero_h - 330.0f * s);
+          const float x = page_origin.x + 16.0f * s;
+          const float max_w = page_size.x * 0.68f;
+          if (!selected_row) {
+            draw_spaced(ui_font, 19.0f * s, ImVec2(x, y), kDimColor,
+                        "XBOX 360  /  LIBRARY", 4.0f * s);
+            y += 40.0f * s;
+            page_draw_list->AddText(display_font, 72.0f * s, ImVec2(x, y),
+                                    kTextColor, "No games yet");
+            y += 92.0f * s;
+            std::string hint = "Copy games from a PC or phone browser: start the "
+                               "transfer server in Storage.";
+            auto urls = UWP::GetWebTransferUrls();
+            if (UWP::IsWebTransferRunning() && !urls.empty()) {
+              hint = "Open " + urls.front() +
+                     " in a browser on your network to copy games here.";
+            }
+            page_draw_list->AddText(ui_font, 26.0f * s, ImVec2(x, y), kDimColor,
+                                    hint.c_str());
+          } else {
+            const std::string title = get_game_display_title(*selected_row);
+            std::string meta = "XBOX 360";
+            if (selected_row->has_metadata &&
+                !selected_row->metadata.publisher.empty()) {
+              meta += "  /  " + to_upper(selected_row->metadata.publisher);
+            }
+            draw_spaced(ui_font, 19.0f * s, ImVec2(x, y), kDimColor,
+                        ellipsize(ui_font, 19.0f * s, meta, max_w), 4.0f * s);
+            y += 38.0f * s;
+
+            float title_size = 84.0f * s;
+            while (title_size > 44.0f * s &&
+                   text_width(display_font, title_size, title) > max_w) {
+              title_size -= 4.0f * s;
+            }
+            page_draw_list->AddText(
+                display_font, title_size, ImVec2(x, y), kTextColor,
+                ellipsize(display_font, title_size, title, max_w).c_str());
+            y += title_size + 22.0f * s;
+
+            // Chips.
+            std::vector<std::string> chips;
+            if (!selected_row->title_id.empty()) {
+              chips.push_back(selected_row->title_id);
+            }
+            if (selected_row->has_metadata &&
+                !selected_row->metadata.release_date.empty()) {
+              chips.push_back(selected_row->metadata.release_date.substr(0, 4));
+            }
+            {
+              std::filesystem::path p = xe::to_path(selected_row->path);
+              std::string ext = to_upper(xe::path_to_utf8(p.extension()));
+              if (!ext.empty() && ext[0] == '.') ext.erase(0, 1);
+              if (ext == "XEX") ext = "FOLDER";
+              if (ext.empty()) ext = "GOD";
+              chips.push_back(ext);
+            }
+            chips.push_back(selected_row->path.find("DevelopmentFiles") !=
+                                    std::string::npos
+                                ? "Dev storage"
+                                : "External storage");
+            float cx = x;
+            const float chip_font = 20.0f * s;
+            const float chip_h = 38.0f * s;
+            for (const auto& chip : chips) {
+              const float w = text_width(ui_font, chip_font, chip) + 32.0f * s;
+              page_draw_list->AddRectFilled(ImVec2(cx, y),
+                                            ImVec2(cx + w, y + chip_h),
+                                            IM_COL32(255, 255, 255, 18),
+                                            chip_h * 0.5f);
+              page_draw_list->AddRect(ImVec2(cx, y), ImVec2(cx + w, y + chip_h),
+                                      IM_COL32(255, 255, 255, 40),
+                                      chip_h * 0.5f, 0, 1.5f * s);
+              page_draw_list->AddText(
+                  ui_font, chip_font,
+                  ImVec2(cx + 16.0f * s, y + (chip_h - chip_font) * 0.5f),
+                  IM_COL32(220, 226, 250, 255), chip.c_str());
+              cx += w + 12.0f * s;
+            }
+            y += chip_h + 30.0f * s;
+
+            // Action pills: Play (A) and Options (X).
+            auto draw_action_pill = [&](float px, const char* label, char button,
+                                        bool primary) {
+              const float h = 66.0f * s;
+              const float font = 30.0f * s;
+              const float icon = 34.0f * s;
+              const float w = text_width(ui_font, font, label) + icon +
+                              (42.0f + 16.0f + 24.0f) * s;
+              const ImVec2 mn(px, y), mx(px + w, y + h);
+              if (primary) {
+                page_draw_list->AddRectFilled(mn, mx, IM_COL32(246, 247, 255, 255),
+                                              h * 0.5f);
+              } else {
+                page_draw_list->AddRectFilled(mn, mx, IM_COL32(255, 255, 255, 24),
+                                              h * 0.5f);
+                page_draw_list->AddRect(mn, mx, IM_COL32(255, 255, 255, 46),
+                                        h * 0.5f, 0, 1.5f * s);
+              }
+              page_draw_list->AddText(
+                  ui_font, font,
+                  ImVec2(px + 42.0f * s, y + (h - font) * 0.5f),
+                  primary ? IM_COL32(12, 14, 30, 255) : kTextColor, label);
+              if (auto icon_tex = GetOrCreateButtonTexture(button)) {
+                const float ix = mx.x - 24.0f * s - icon;
+                const float iy = y + (h - icon) * 0.5f;
+                page_draw_list->AddImage(
+                    reinterpret_cast<ImTextureID>(icon_tex.get()),
+                    ImVec2(ix, iy), ImVec2(ix + icon, iy + icon));
+              }
+              return mx.x;
+            };
+            const float after_play = draw_action_pill(x, "Play", 'A', true);
+            draw_action_pill(after_play + 20.0f * s, "Options", 'X', false);
+          }
         }
 
-        const float avail_width = ImGui::GetContentRegionAvail().x;
-        float left_panel_width = avail_width * 0.584f;
-
-        if (ImGui::BeginChild("##gamelist_left", ImVec2(left_panel_width, content_height),
-                              false, ImGuiWindowFlags_NoScrollbar)) {
-
-            if (gamelist_window_focus_requested && !show_search_panel_ &&
-                !search_panel_focus_input_requested_ &&
-                !search_panel_list_focus_requested_) {
-              ImGui::SetWindowFocus("##gamelist_left");
-              gamelist_window_focus_requested = false;
-            }
-
-            const float carousel_outer_padding = 14.0f * display_scale;
-            const float carousel_spacing = 16.0f * display_scale;
-            const float carousel_card_height = 126.0f * display_scale;
-            const float carousel_horizontal_offset = 30.0f * display_scale;
-            const std::vector<size_t> ordered_game_row_indices =
-                build_top_loop_order(game_rows.size(), selected_game_row_index);
-            ImGui::Dummy(ImVec2(0.0f, 10.0f * display_scale));
-
-            for (size_t ordered_index = 0;
-                 ordered_index < ordered_game_row_indices.size(); ++ordered_index) {
-              const auto& row = game_rows[ordered_game_row_indices[ordered_index]];
-              ImGui::PushID(row.path.c_str());
-              const bool is_selected = selected_game_path_ == row.path;
-              const float row_height = carousel_card_height;
-              const float side_inset = carousel_outer_padding;
-              const float card_width = std::max(
-                  160.0f * display_scale,
-                  ImGui::GetContentRegionAvail().x - side_inset * 2.0f -
-                      carousel_horizontal_offset);
-              const float row_start_x =
-                  ImGui::GetCursorPosX() + side_inset + carousel_horizontal_offset;
-              if (!is_any_game_context_open && is_selected) {
-                if (gamelist_focus_requested ||
-                    (!ImGui::IsAnyItemFocused() &&
-                     ImGui::IsWindowFocused(
-                         ImGuiFocusedFlags_RootAndChildWindows))) {
-                  ImGui::SetKeyboardFocusHere();
-                  gamelist_focus_requested = false;
-                }
-              }
-              if (!is_any_game_context_open && gamelist_focus_selected_request &&
-                  is_selected) {
-                ImGui::SetKeyboardFocusHere();
-                gamelist_focus_selected_request = false;
-              }
-              const ImGuiSelectableFlags row_selectable_flags =
-                  is_any_game_context_open ? ImGuiSelectableFlags_Disabled : 0;
-              ImGui::SetCursorPosX(row_start_x);
-              ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0, 0, 0, 0));
-              ImGui::PushStyleColor(ImGuiCol_HeaderHovered,
-                                    ImVec4(0, 0, 0, 0));
-              ImGui::PushStyleColor(ImGuiCol_HeaderActive,
-                                    ImVec4(0, 0, 0, 0));
-              ImGui::PushStyleColor(ImGuiCol_NavHighlight,
-                                    ImVec4(0, 0, 0, 0));
-              if (ImGui::Selectable("##game_row", is_selected,
-                                   row_selectable_flags,
-                                   ImVec2(card_width, row_height))) {
-                selected_game_path_ = row.path;
-                selected_game_name_ = row.filename;
-                gamelist_focus_selected_request = true;
-              }
-              ImGui::PopStyleColor(4);
-              const bool row_focused = ImGui::IsItemFocused();
-              if (!is_any_game_context_open && row_focused && !is_selected) {
-                selected_game_path_ = row.path;
-                selected_game_name_ = row.filename;
-              }
-              if (!is_any_game_context_open && row_focused) {
-                const bool nav_up =
-                    ImGui::IsKeyPressed(ImGuiKey_GamepadDpadUp, false) ||
-                    ImGui::IsKeyPressed(ImGuiKey_UpArrow, false);
-                const bool nav_down =
-                    ImGui::IsKeyPressed(ImGuiKey_GamepadDpadDown, false) ||
-                    ImGui::IsKeyPressed(ImGuiKey_DownArrow, false);
-                if (nav_up && game_rows.size() > 1) {
-                  size_t new_index =
-                      (selected_game_row_index + game_rows.size() - 1) %
-                      game_rows.size();
-                  focus_game_row_by_index(new_index, true);
-                } else if (nav_down && game_rows.size() > 1) {
-                  focus_game_row_by_index(selected_game_row_index + 1, true);
-                }
-              }
-              if (!is_any_game_context_open && is_selected) {
-                ImGui::SetItemDefaultFocus();
-              }
-
-              const ImVec2 item_min = ImGui::GetItemRectMin();
-              const ImVec2 item_max = ImGui::GetItemRectMax();
-              const float pad = 10.0f * display_scale;
-              const float art_size = carousel_card_height - pad * 2.0f;
-              const float image_x = item_min.x + pad;
-              const float image_y = item_min.y + std::max(0.0f, (row_height - art_size) * 0.5f);
-              const float text_area_min_x = image_x + art_size + pad * 2.2f;
-              const float text_area_max_x = item_max.x - pad;
-              const float text_area_width = std::max(0.0f, text_area_max_x - text_area_min_x);
-
-              const std::string* gamelist_image_path = get_gamelist_art_path(row);
-
-              if (gamelist_image_path) {
-                auto gamelist_tex = GetOrCreateImageTexture(*gamelist_image_path);
-                if (gamelist_tex) {
-                  ImGui::SetCursorScreenPos(
-                      ImVec2(image_x, image_y));
-                  ImGui::Image(reinterpret_cast<ImTextureID>(gamelist_tex.get()),
-                               ImVec2(art_size, art_size));
-                }
-              }
-
-              const std::string display_title = get_game_display_title(row);
-              const ImVec2 title_size = ImGui::CalcTextSize(display_title.c_str());
-              const std::string secondary_text = get_game_subtitle(row, display_title);
-              const ImVec2 secondary_size = secondary_text.empty()
-                                                ? ImVec2(0.0f, 0.0f)
-                                                : ImGui::CalcTextSize(secondary_text.c_str());
-              const float text_line_spacing = 10.0f * display_scale;
-              const float combined_text_height =
-                  title_size.y +
-                  (secondary_text.empty() ? 0.0f : (text_line_spacing + secondary_size.y));
-              const float title_y =
-                  item_min.y + std::max(0.0f, (row_height - combined_text_height) * 0.5f);
-              const float title_x = text_area_min_x;
-              DrawTextWithConfiguredEffect(
-                  ImGui::GetWindowDrawList(), ImGui::GetFont(),
-                  ImGui::GetFontSize(), ImVec2(title_x, title_y),
-                  IM_COL32(228, 228, 228, 255), display_title.c_str());
-
-              if (!secondary_text.empty()) {
-                const float secondary_x = text_area_min_x;
-                DrawTextWithConfiguredEffect(
-                    ImGui::GetWindowDrawList(), ImGui::GetFont(),
-                    ImGui::GetFontSize(),
-                    ImVec2(secondary_x, title_y + title_size.y + text_line_spacing),
-                    IM_COL32(153, 153, 153, 255), secondary_text.c_str());
-              }
-
-              if (!is_any_game_context_open && row_focused &&
-                  selected_game_path_ == row.path &&
-                  ImGui::IsKeyPressed(ImGuiKey_GamepadFaceDown, false)) {
-                request_launch_selected_game = true;
-                launch_game_path = row.path;
-              }
-
-              if (!is_any_game_context_open && row_focused &&
-                  ImGui::IsKeyPressed(ImGuiKey_F12, false)) {
-                selected_game_path_ = row.path;
-                selected_game_name_ = row.filename;
-                request_open_game_context_menu = true;
-              }
-              ImGui::PopID();
-              ImGui::Dummy(ImVec2(0.0f, carousel_spacing));
-            }
+        // Section header -----------------------------------------------------
+        const float section_y = page_origin.y + hero_h;
+        page_draw_list->AddText(display_font, 34.0f * s,
+                                ImVec2(page_origin.x + 16.0f * s, section_y),
+                                kTextColor, "Library");
+        {
+          const std::string count =
+              std::to_string(game_rows.size()) +
+              (game_rows.size() == 1 ? " TITLE" : " TITLES");
+          float w = 0.0f;
+          for (char c : count) {
+            char ch[2] = {c, 0};
+            w += ui_font->CalcTextSizeA(18.0f * s, FLT_MAX, 0.0f, ch).x + 4.0f * s;
           }
+          draw_spaced(ui_font, 18.0f * s,
+                      ImVec2(page_origin.x + page_size.x - w - 16.0f * s,
+                             section_y + 10.0f * s),
+                      kFaintColor, count, 4.0f * s);
+        }
+
+        // Cover row (selected game first, Jadyx-style) -----------------------
+        ImGui::SetCursorScreenPos(
+            ImVec2(page_origin.x, page_origin.y + hero_h + section_h));
+        if (ImGui::BeginChild("##gamelist_left", ImVec2(page_size.x, row_h),
+                              false,
+                              ImGuiWindowFlags_NoScrollbar |
+                                  ImGuiWindowFlags_NoScrollWithMouse)) {
+          if (gamelist_window_focus_requested && !show_search_panel_ &&
+              !search_panel_focus_input_requested_ &&
+              !search_panel_list_focus_requested_) {
+            ImGui::SetWindowFocus("##gamelist_left");
+            gamelist_window_focus_requested = false;
+          }
+          ImDrawList* row_draw_list = ImGui::GetWindowDrawList();
+          const std::vector<size_t> ordered_game_row_indices =
+              build_top_loop_order(game_rows.size(), selected_game_row_index);
+          const size_t visible_cards = std::max<size_t>(
+              1, size_t((page_size.x + card_gap) / (card_w + card_gap)) + 1);
+          ImGui::SetCursorPos(ImVec2(16.0f * s, 8.0f * s));
+          for (size_t ordered_index = 0;
+               ordered_index < ordered_game_row_indices.size() &&
+               ordered_index < visible_cards;
+               ++ordered_index) {
+            const auto& row = game_rows[ordered_game_row_indices[ordered_index]];
+            ImGui::PushID(row.path.c_str());
+            const bool is_selected = selected_game_path_ == row.path;
+            if (!is_any_game_context_open && is_selected) {
+              if (gamelist_focus_requested ||
+                  (!ImGui::IsAnyItemFocused() &&
+                   ImGui::IsWindowFocused(
+                       ImGuiFocusedFlags_RootAndChildWindows))) {
+                ImGui::SetKeyboardFocusHere();
+                gamelist_focus_requested = false;
+              }
+            }
+            if (!is_any_game_context_open && gamelist_focus_selected_request &&
+                is_selected) {
+              ImGui::SetKeyboardFocusHere();
+              gamelist_focus_selected_request = false;
+            }
+            const ImGuiSelectableFlags flags =
+                is_any_game_context_open ? ImGuiSelectableFlags_Disabled : 0;
+            ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0, 0, 0, 0));
+            ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(0, 0, 0, 0));
+            ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImVec4(0, 0, 0, 0));
+            ImGui::PushStyleColor(ImGuiCol_NavHighlight, ImVec4(0, 0, 0, 0));
+            if (ImGui::Selectable("##game_row", is_selected, flags,
+                                  ImVec2(card_w, card_h + card_label_h))) {
+              selected_game_path_ = row.path;
+              selected_game_name_ = row.filename;
+              gamelist_focus_selected_request = true;
+            }
+            ImGui::PopStyleColor(4);
+            const bool row_focused = ImGui::IsItemFocused();
+            if (!is_any_game_context_open && row_focused && !is_selected) {
+              selected_game_path_ = row.path;
+              selected_game_name_ = row.filename;
+            }
+            if (!is_any_game_context_open && row_focused) {
+              const bool nav_prev =
+                  ImGui::IsKeyPressed(ImGuiKey_GamepadDpadLeft, false) ||
+                  ImGui::IsKeyPressed(ImGuiKey_LeftArrow, false);
+              const bool nav_next =
+                  ImGui::IsKeyPressed(ImGuiKey_GamepadDpadRight, false) ||
+                  ImGui::IsKeyPressed(ImGuiKey_RightArrow, false);
+              if (nav_prev && game_rows.size() > 1) {
+                focus_game_row_by_index(
+                    (selected_game_row_index + game_rows.size() - 1) %
+                        game_rows.size(),
+                    true);
+              } else if (nav_next && game_rows.size() > 1) {
+                focus_game_row_by_index(selected_game_row_index + 1, true);
+              }
+            }
+            if (!is_any_game_context_open && is_selected) {
+              ImGui::SetItemDefaultFocus();
+            }
+
+            const ImVec2 item_min = ImGui::GetItemRectMin();
+            const float rounding = 16.0f * s;
+            ImVec2 cover_min = item_min;
+            ImVec2 cover_max(item_min.x + card_w, item_min.y + card_h);
+            if (is_selected) {
+              // Xenon glow + white focus ring around the selected cover.
+              for (int g = 0; g < 10; ++g) {
+                const float grow = (10 - g) * 2.2f * s;
+                row_draw_list->AddRectFilled(
+                    ImVec2(cover_min.x - grow, cover_min.y - grow),
+                    ImVec2(cover_max.x + grow, cover_max.y + grow),
+                    IM_COL32(122, 120, 255, 9), rounding + grow);
+              }
+            }
+            const std::string display_title = get_game_display_title(row);
+            draw_cover(get_cover_art(row), cover_min, cover_max, rounding,
+                       is_selected ? IM_COL32(255, 255, 255, 255)
+                                   : IM_COL32(205, 210, 230, 235),
+                       display_title);
+            if (is_selected) {
+              row_draw_list->AddRect(
+                  ImVec2(cover_min.x - 4.0f * s, cover_min.y - 4.0f * s),
+                  ImVec2(cover_max.x + 4.0f * s, cover_max.y + 4.0f * s),
+                  IM_COL32(245, 247, 255, 255), rounding + 4.0f * s, 0,
+                  3.0f * s);
+            }
+            const float label_font = 22.0f * s;
+            row_draw_list->AddText(
+                ui_font, label_font,
+                ImVec2(cover_min.x, cover_max.y + 14.0f * s),
+                is_selected ? kTextColor : kDimColor,
+                ellipsize(ui_font, label_font, display_title, card_w).c_str());
+            row_draw_list->AddText(
+                ui_font, 18.0f * s,
+                ImVec2(cover_min.x, cover_max.y + 42.0f * s), kFaintColor,
+                ellipsize(ui_font, 18.0f * s,
+                          get_game_subtitle(row, display_title), card_w)
+                    .c_str());
+
+            if (!is_any_game_context_open && row_focused &&
+                selected_game_path_ == row.path &&
+                ImGui::IsKeyPressed(ImGuiKey_GamepadFaceDown, false)) {
+              request_launch_selected_game = true;
+              launch_game_path = row.path;
+            }
+            if (!is_any_game_context_open && row_focused &&
+                ImGui::IsKeyPressed(ImGuiKey_F12, false)) {
+              selected_game_path_ = row.path;
+              selected_game_name_ = row.filename;
+              request_open_game_context_menu = true;
+            }
+            ImGui::PopID();
+            ImGui::SameLine(0.0f, card_gap);
+          }
+        }
         ImGui::EndChild();
 
         if (!is_any_game_context_open && controller_x_debounced) {
@@ -3340,150 +3608,6 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
             request_open_game_context_menu = true;
           }
         }
-
-        ImGui::SameLine();
-
-        if (ImGui::BeginChild("##main_page", ImVec2(0, content_height), false,
-                              ImGuiWindowFlags_NoScrollbar)) {
-            if (selected_row) {
-              ImGui::Dummy(ImVec2(0.0f, 21.0f * display_scale));
-              std::string detail_title = selected_row->filename;
-              if (selected_row->has_metadata &&
-                  !selected_row->metadata.display_name.empty()) {
-                detail_title = selected_row->metadata.display_name;
-              }
-
-              const std::string* hero_image_path = nullptr;
-              if (selected_row->has_metadata) {
-                const auto& metadata = selected_row->metadata;
-                const std::string* banner_path =
-                    metadata.banner_path.empty() ? nullptr : &metadata.banner_path;
-                const std::string* gallery_path =
-                    metadata.gallery_paths.empty() ? nullptr : &metadata.gallery_paths.front();
-                auto select_hero_image = [&](bool prefer_banner)
-                    -> const std::string* {
-                  if (prefer_banner) {
-                    if (banner_path) {
-                      return banner_path;
-                    }
-                    if (gallery_path) {
-                      return gallery_path;
-                    }
-                  } else {
-                    if (gallery_path) {
-                      return gallery_path;
-                    }
-                    if (banner_path) {
-                      return banner_path;
-                    }
-                  }
-                  return nullptr;
-                };
-                hero_image_path = select_hero_image(cvars::ui_prefer_banner_hero_art);
-              }
-
-              if (hero_image_path) {
-                auto hero_tex = GetOrCreateImageTexture(*hero_image_path);
-                if (hero_tex) {
-                  const float avail_w = ImGui::GetContentRegionAvail().x - 42.0f * display_scale;
-                  const float aspect_ratio = static_cast<float>(hero_tex->width) / static_cast<float>(hero_tex->height);
-                  const float uniform_h = avail_w / aspect_ratio;
-                  ImGui::Image(reinterpret_cast<ImTextureID>(hero_tex.get()),
-                               ImVec2(avail_w, uniform_h), ImVec2(0,0), ImVec2(1,1));
-                }
-              }
-
-              if (cvars::ui_show_title_metadata) {
-                ImGui::TextWrapped("%s", detail_title.c_str());
-              }
-              
-              const std::string* detail_description = nullptr;
-              if (selected_row->has_metadata) {
-                const auto& metadata = selected_row->metadata;
-                const std::string* short_desc =
-                    metadata.description_short.empty() ? nullptr : &metadata.description_short;
-                const std::string* full_desc =
-                    metadata.description_full.empty() ? nullptr : &metadata.description_full;
-                auto select_description = [&](bool prefer_short)
-                    -> const std::string* {
-                  if (prefer_short) {
-                    if (short_desc) {
-                      return short_desc;
-                    }
-                    if (full_desc) {
-                      return full_desc;
-                    }
-                  } else {
-                    if (full_desc) {
-                      return full_desc;
-                    }
-                    if (short_desc) {
-                      return short_desc;
-                    }
-                  }
-                  return nullptr;
-                };
-                detail_description = select_description(cvars::ui_prefer_short_descriptions);
-              }
-
-              if (detail_description) {
-                ImGui::Spacing();
-                const float description_right_margin =
-                    (6.0f + 42.0f) * display_scale;
-                const float wrap_limit =
-                    ImGui::GetCursorPos().x +
-                    std::max(0.0f, ImGui::GetContentRegionAvail().x -
-                                         description_right_margin);
-                ImGui::PushTextWrapPos(wrap_limit);
-                ImGui::TextWrapped("%s",
-                                    detail_description->c_str());
-                ImGui::PopTextWrapPos();
-              }
-              
-              if (selected_row->has_metadata) {
-                if (!selected_row->metadata.publisher.empty()) {
-                  ImGui::Spacing();
-                  ImGui::TextDisabled("Publisher: %s", selected_row->metadata.publisher.c_str());
-                }
-                if (cvars::ui_show_developer_metadata &&
-                    !selected_row->metadata.developer.empty()) {
-                  ImGui::TextDisabled("Developer: %s", selected_row->metadata.developer.c_str());
-                }
-                if (cvars::ui_show_genre_metadata &&
-                    !selected_row->metadata.genre.empty()) {
-                  std::string genre_str;
-                  for (size_t i = 0; i < selected_row->metadata.genre.size(); ++i) {
-                    if (i > 0) genre_str += ",";
-                    genre_str += selected_row->metadata.genre[i];
-                  }
-                  ImGui::TextDisabled("Genre: %s", genre_str.c_str());
-                }
-                if (cvars::ui_show_release_date_metadata &&
-                    !selected_row->metadata.release_date.empty()) {
-                  ImGui::TextDisabled("Release Date: %s", selected_row->metadata.release_date.c_str());
-                }
-                if (cvars::ui_show_user_rating_metadata &&
-                    !selected_row->metadata.user_rating.empty()) {
-                  ImGui::TextDisabled("Rating: %s", selected_row->metadata.user_rating.c_str());
-                }
-              }
-              
-              if (cvars::ui_show_title_id_metadata &&
-                  !selected_row->title_id.empty()) {
-                ImGui::Spacing();
-                ImGui::TextDisabled("Title ID: %s", selected_row->title_id.c_str());
-              }
-              if (selected_row->has_metadata && selected_row->metadata.metadata_ready) {
-                if (!selected_row->metadata.title_type.empty()) {
-                  ImGui::TextDisabled("Type: %s",
-                                      selected_row->metadata.title_type.c_str());
-                }
-              } else {
-                ImGui::TextDisabled("Metadata: Fetching from x360db...");
-              }
-            }
-          }
-        ImGui::EndChild();
 
         if (show_search_panel_) {
           const ImGuiViewport* viewport = ImGui::GetMainViewport();
@@ -7239,12 +7363,14 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
               cvar::ConfigVars->find("ui_border_color")->second);
           std::string current_border_color =
               c_border_color ? c_border_color->GetTypedConfigValue() : "green";
-          const char* border_color_values[] = {"green",  "purple", "red",
-                                               "orange", "blue",   "yellow",
-                                               "grey",   "black",  "white"};
+          const char* border_color_values[] = {"xenon",  "green", "purple",
+                                               "red",    "orange", "blue",
+                                               "yellow", "grey",  "black",
+                                               "white"};
           const char* border_color_labels[] = {
-              "Green (#61C032)", "Purple", "Red",   "Orange",
-              "Blue",            "Yellow", "Grey", "Black", "White"};
+              "Xenon (#7A8CFF)", "Green (#61C032)", "Purple", "Red",
+              "Orange",          "Blue",            "Yellow", "Grey",
+              "Black",           "White"};
           int current_border_color_index = 0;
           for (int i = 0;
                i < static_cast<int>(sizeof(border_color_values) /
@@ -8008,94 +8134,161 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
           ImVec2(center.x + half.x, center.y + half.y));
     };
 
-    const char* overlay_header_text = "Select a Game";
-    switch (active_frontend_page_) {
-      case FrontendPage::kGameList:
-        overlay_header_text = "Select a Game";
-        break;
-      case FrontendPage::kSettings:
-        overlay_header_text = "Make some Tweaks";
-        break;
-      case FrontendPage::kPaths:
-        overlay_header_text = "Choose your Path";
-        break;
-      case FrontendPage::kAbout:
-        overlay_header_text = "Get the Info";
-        break;
-      default:
-        overlay_header_text = "Select a Game";
-        break;
-    }
-
+    // ---- Xenon top bar + footer -----------------------------------------
     frontend_draw_list->PushClipRect(ImVec2(0.0f, 0.0f), io.DisplaySize, false);
+    {
+      const float s = io.DisplaySize.x / 1920.0f;
+      const ImVec2 ds = io.DisplaySize;
+      ImFont* ui_font = ImGui::GetFont();
+      ImFont* brand_font = xe::ui::GetXenonDisplayFont();
+      if (!brand_font) brand_font = ui_font;
+      const ImU32 kText = IM_COL32(238, 241, 255, 255);
+      const ImU32 kDim = IM_COL32(160, 168, 205, 255);
+      auto tw = [](ImFont* f, float size, const char* t) {
+        return f->CalcTextSizeA(size, FLT_MAX, 0.0f, t).x;
+      };
+      auto draw_spaced = [&](ImFont* f, float size, ImVec2 pos, ImU32 col,
+                             const char* t, float spacing) {
+        char ch[2] = {0, 0};
+        for (const char* p = t; *p; ++p) {
+          ch[0] = *p;
+          frontend_draw_list->AddText(f, size, pos, col, ch, ch + 1);
+          pos.x += f->CalcTextSizeA(size, FLT_MAX, 0.0f, ch, ch + 1).x + spacing;
+        }
+        return pos.x;
+      };
+      const float bar_cy = 64.0f * s;
 
-    DrawTextWithConfiguredEffect(frontend_draw_list, ImGui::GetFont(),
-                                 26.0f * uy,
-                                 ImVec2(150.0f * ux, 18.0f * uy),
-                                 IM_COL32(228, 228, 228, 255),
-                                 overlay_header_text);
-    constexpr float kRotateClockwise90 = -3.14159265f * 0.5f;
-    constexpr float kRotateCounterClockwise90 = 3.14159265f * 0.5f;
+      // Wordmark.
+      const float mark_size = 38.0f * s;
+      const float after_mark = draw_spaced(
+          brand_font, mark_size, ImVec2(96.0f * s, bar_cy - mark_size * 0.5f),
+          kText, "XENON", 10.0f * s);
+      draw_spaced(ui_font, 18.0f * s,
+                  ImVec2(after_mark + 18.0f * s, bar_cy - 9.0f * s), kDim,
+                  "SERIES X|S", 4.0f * s);
 
-    struct RailSlot {
-      ImVec2 pos;
-      float rotation;
-      float font_size;
-    };
-    const RailSlot slots[4] = {
-        {ImVec2(125.0f * ux, 115.0f * uy), kRotateCounterClockwise90,
-         26.0f * uy},
-        {ImVec2(81.0f * ux, 129.0f * uy), kRotateCounterClockwise90,
-         22.0f * uy},
-        {ImVec2(926.0f * ux, 137.0f * uy), kRotateCounterClockwise90,
-         26.0f * uy},
-        {ImVec2(965.0f * ux, 147.0f * uy), kRotateCounterClockwise90,
-         22.0f * uy}};
-
-    const char* tab_labels[4] = {"games", "settings", "paths", "about"};
-    int active_index = static_cast<int>(active_frontend_page_);
-    
-    // Check if tabs text should be hidden
-    auto c_hide_tabs = dynamic_cast<cvar::ConfigVar<bool>*>(
-        cvar::ConfigVars->find("ui_hide_tabs_text")->second);
-    bool hide_tabs_text = c_hide_tabs ? c_hide_tabs->GetTypedConfigValue() : false;
-    
-    if (!hide_tabs_text) {
+      // Pill tabs with LB / RB hints.
+      const char* tab_names[4] = {"Library", "Settings", "Storage", "About"};
+      const float tab_font = 26.0f * s;
+      const float tab_pad = 28.0f * s;
+      const float tab_h = 54.0f * s;
+      const float inset = 6.0f * s;
+      float total_w = inset * 2.0f;
+      float tab_w[4];
       for (int i = 0; i < 4; ++i) {
-        int slot_index = (active_index + i) % 4;
-        draw_rotated_text(tab_labels[slot_index], slots[i].pos, slots[i].font_size,
-                          IM_COL32(0, 0, 0, 255), slots[i].rotation);
+        tab_w[i] = tw(ui_font, tab_font, tab_names[i]) + tab_pad * 2.0f;
+        total_w += tab_w[i];
       }
-    }
-    const float footer_text_size = 13.5f * uy;
-    const float footer_icon_size = 15.6f * uy;
-    xe::app::DrawFooterPrompt(frontend_draw_list, GetOrCreateButtonTexture('Y'),
-                              footer_text_size, footer_icon_size, "Search",
-                              526.0f * uy, 178.0f * ux, -13.0f * ux);
-    xe::app::DrawFooterPrompt(frontend_draw_list, GetOrCreateButtonTexture('X'),
-                              footer_text_size, footer_icon_size, "Game Menu",
-                              543.0f * uy, 165.0f * ux, -17.0f * ux);
-    xe::app::DrawFooterPrompt(frontend_draw_list, GetOrCreateButtonTexture('B'),
-                              footer_text_size, footer_icon_size, "Back",
-                              526.0f * uy, 816.0f * ux, 35.0f * ux);
-    xe::app::DrawFooterPrompt(frontend_draw_list, GetOrCreateButtonTexture('A'),
-                              footer_text_size, footer_icon_size, "Select",
-                              543.0f * uy, 825.0f * ux, 42.0f * ux);
-    if (auto logo = GetOrCreateXeniaLogo()) {
-      const float logo_aspect = logo->height > 0
-                                    ? static_cast<float>(logo->width) /
-                                          static_cast<float>(logo->height)
-                                    : 1.0f;
-      const float target_height = 42.0f * uy;
-      const float target_width = target_height * logo_aspect;
-      const ImVec2 logo_center(826.0f * ux, 34.0f * uy);
-      const ImVec2 logo_half_size(target_width * 0.5f, target_height * 0.5f);
-      const ImVec2 logo_min(logo_center.x - logo_half_size.x,
-                             logo_center.y - logo_half_size.y);
-      const ImVec2 logo_max(logo_center.x + logo_half_size.x,
-                             logo_center.y + logo_half_size.y);
-      frontend_draw_list->AddImage(reinterpret_cast<ImTextureID>(logo.get()),
-                                   logo_min, logo_max);
+      const float cont_h = tab_h + inset * 2.0f;
+      const ImVec2 cont_min(ds.x * 0.5f - total_w * 0.5f, bar_cy - cont_h * 0.5f);
+      const ImVec2 cont_max(cont_min.x + total_w, cont_min.y + cont_h);
+      frontend_draw_list->AddRectFilled(cont_min, cont_max,
+                                        IM_COL32(255, 255, 255, 16),
+                                        cont_h * 0.5f);
+      frontend_draw_list->AddRect(cont_min, cont_max, IM_COL32(255, 255, 255, 30),
+                                  cont_h * 0.5f, 0, 1.5f * s);
+      float tx = cont_min.x + inset;
+      const int active = static_cast<int>(active_frontend_page_);
+      for (int i = 0; i < 4; ++i) {
+        const ImVec2 mn(tx, cont_min.y + inset);
+        const ImVec2 mx(tx + tab_w[i], mn.y + tab_h);
+        const bool on = i == active;
+        if (on) {
+          frontend_draw_list->AddRectFilled(mn, mx, IM_COL32(122, 120, 255, 235),
+                                            tab_h * 0.5f);
+        }
+        if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
+            ImGui::IsMouseHoveringRect(mn, mx, false)) {
+          active_frontend_page_ = static_cast<FrontendPage>(i);
+        }
+        frontend_draw_list->AddText(
+            ui_font, tab_font,
+            ImVec2(mn.x + tab_pad, mn.y + (tab_h - tab_font) * 0.5f),
+            on ? IM_COL32(255, 255, 255, 255) : IM_COL32(200, 206, 236, 210),
+            tab_names[i]);
+        tx += tab_w[i];
+      }
+      auto draw_bumper = [&](const char* label, float cx) {
+        const float w = 58.0f * s, h = 38.0f * s;
+        const ImVec2 mn(cx - w * 0.5f, bar_cy - h * 0.5f);
+        const ImVec2 mx(cx + w * 0.5f, bar_cy + h * 0.5f);
+        frontend_draw_list->AddRectFilled(mn, mx, IM_COL32(255, 255, 255, 12),
+                                          h * 0.5f);
+        frontend_draw_list->AddRect(mn, mx, IM_COL32(255, 255, 255, 40), h * 0.5f,
+                                    0, 1.5f * s);
+        const float f = 19.0f * s;
+        frontend_draw_list->AddText(
+            ui_font, f,
+            ImVec2(cx - tw(ui_font, f, label) * 0.5f, bar_cy - f * 0.5f), kDim,
+            label);
+      };
+      draw_bumper("LB", cont_min.x - 52.0f * s);
+      draw_bumper("RB", cont_max.x + 52.0f * s);
+
+      // Right side: transfer status chip + clock.
+      char clock[16] = "";
+      {
+        std::time_t now = std::time(nullptr);
+        std::tm local_tm{};
+        localtime_s(&local_tm, &now);
+        std::strftime(clock, sizeof(clock), "%H:%M", &local_tm);
+      }
+      const float clock_font = 30.0f * s;
+      float rx = ds.x - 96.0f * s - tw(ui_font, clock_font, clock);
+      frontend_draw_list->AddText(ui_font, clock_font,
+                                  ImVec2(rx, bar_cy - clock_font * 0.5f), kText,
+                                  clock);
+      if (UWP::IsWebTransferRunning()) {
+        const char* label = "Transfer on";
+        const float f = 19.0f * s;
+        const float h = 38.0f * s;
+        const float w = tw(ui_font, f, label) + 50.0f * s;
+        rx -= w + 26.0f * s;
+        const ImVec2 mn(rx, bar_cy - h * 0.5f), mx(rx + w, bar_cy + h * 0.5f);
+        frontend_draw_list->AddRectFilled(mn, mx, IM_COL32(122, 140, 255, 40),
+                                          h * 0.5f);
+        frontend_draw_list->AddRect(mn, mx, IM_COL32(122, 140, 255, 120),
+                                    h * 0.5f, 0, 1.5f * s);
+        frontend_draw_list->AddCircleFilled(ImVec2(mn.x + 20.0f * s, bar_cy),
+                                            5.0f * s,
+                                            IM_COL32(110, 200, 255, 255));
+        frontend_draw_list->AddText(ui_font, f,
+                                    ImVec2(mn.x + 34.0f * s, bar_cy - f * 0.5f),
+                                    IM_COL32(210, 218, 255, 255), label);
+      }
+
+      // Footer: button hints (left) and version (right).
+      const float foot_cy = ds.y - 52.0f * s;
+      float fx = 96.0f * s;
+      auto draw_hint = [&](char button, const char* label) {
+        const float icon = 34.0f * s;
+        if (auto tex = GetOrCreateButtonTexture(button)) {
+          frontend_draw_list->AddImage(
+              reinterpret_cast<ImTextureID>(tex.get()),
+              ImVec2(fx, foot_cy - icon * 0.5f),
+              ImVec2(fx + icon, foot_cy + icon * 0.5f));
+        }
+        const float f = 24.0f * s;
+        frontend_draw_list->AddText(ui_font, f,
+                                    ImVec2(fx + icon + 12.0f * s, foot_cy - f * 0.5f),
+                                    IM_COL32(220, 226, 250, 255), label);
+        fx += icon + 12.0f * s + tw(ui_font, f, label) + 40.0f * s;
+      };
+      if (active_frontend_page_ == FrontendPage::kGameList) {
+        draw_hint('A', "Play");
+        draw_hint('X', "Game Menu");
+        draw_hint('Y', "Search");
+      } else {
+        draw_hint('A', "Select");
+        draw_hint('B', "Back");
+      }
+      const char* version = "Xenia-Xenon v1.1.7.5";
+      const float vf = 20.0f * s;
+      frontend_draw_list->AddText(
+          ui_font, vf,
+          ImVec2(ds.x - 96.0f * s - tw(ui_font, vf, version), foot_cy - vf * 0.5f),
+          IM_COL32(160, 168, 205, 170), version);
     }
 
     DrawNoProfilePrompt(io);

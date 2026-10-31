@@ -218,7 +218,10 @@ inline void MarkConfiguredTextEnd(ImDrawList* draw_list) {
 
 inline ImVec4 GetConfiguredUIAccentColor(float alpha = 1.0f) {
   const std::string accent =
-      ui_text_effect_helpers::GetStringConfigValue("ui_border_color", "green");
+      ui_text_effect_helpers::GetStringConfigValue("ui_border_color", "xenon");
+  if (accent == "xenon") {
+    return ImVec4(122.0f / 255.0f, 140.0f / 255.0f, 255.0f / 255.0f, alpha);
+  }
   if (accent == "purple") {
     return ImVec4(168.0f / 255.0f, 78.0f / 255.0f, 211.0f / 255.0f, alpha);
   }

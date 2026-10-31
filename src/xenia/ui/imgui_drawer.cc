@@ -66,6 +66,9 @@ DECLARE_double(ui_text_contrast);
 
 namespace xe {
 namespace ui {
+constexpr char kXenonFontPath[] = "Assets/fonts/SpaceGrotesk-Medium.ttf";
+constexpr char kXenonDisplayFontPath[] = "Assets/fonts/SpaceGrotesk-Bold.ttf";
+static ImFont* g_xenon_display_font = nullptr;
 
 // File: 'ProggyTiny.ttf' (35656 bytes)
 // Exported using binary_to_compressed_c.cpp
@@ -95,6 +98,9 @@ enum class ConfiguredTextColorMode {
 
 ImVec4 GetConfiguredUIAccentColor(float alpha = 1.0f) {
   const std::string& accent = cvars::ui_border_color;
+  if (accent == "xenon") {
+    return ImVec4(122.0f / 255.0f, 140.0f / 255.0f, 255.0f / 255.0f, alpha);
+  }
   if (accent == "purple") {
     return ImVec4(168.0f / 255.0f, 78.0f / 255.0f, 211.0f / 255.0f, alpha);
   }
@@ -428,6 +434,15 @@ void ImGuiDrawer::Initialize() {
   InitializeFonts(font_size);
   InitializeFonts(title_font_size);
 
+  // Large bold face for frontend hero titles and the wordmark.
+  if (std::filesystem::exists(kXenonDisplayFontPath)) {
+    ImFontConfig display_config;
+    display_config.OversampleH = display_config.OversampleV = 2;
+    g_xenon_display_font = io.Fonts->AddFontFromFileTTF(
+        kXenonDisplayFontPath, 72.0f, &display_config,
+        io.Fonts->GetGlyphRangesDefault());
+  }
+
 #ifdef XE_PLATFORM_LINUX
   io.SetClipboardTextFn = SetClipboardText;
   io.GetClipboardTextFn = GetClipboardText;
@@ -437,9 +452,14 @@ void ImGuiDrawer::Initialize() {
   style.ScrollbarRounding = 6.0f;
   style.WindowRounding = 6.0f;
   style.TabRounding = 4.0f;
-  style.FrameRounding = 4.0f;
-  style.PopupRounding = 4.0f;
-  style.GrabRounding = 4.0f;
+  style.FrameRounding = 10.0f;
+  style.PopupRounding = 14.0f;
+  style.GrabRounding = 10.0f;
+  style.ChildRounding = 14.0f;
+  style.WindowRounding = 16.0f;
+  style.ScrollbarRounding = 10.0f;
+  style.FramePadding = ImVec2(12.0f, 7.0f);
+  style.ItemSpacing = ImVec2(10.0f, 8.0f);
   style.ScrollbarSize = 16.0f;
   style.WindowBorderSize = 1.0f;
   style.ChildBorderSize = 0.0f;
@@ -450,21 +470,22 @@ void ImGuiDrawer::Initialize() {
   style.DisplaySafeAreaPadding = ImVec2(0.0f, 0.0f);
   style.DisplayWindowPadding = ImVec2(0.0f, 0.0f);
 
-  style.Colors[ImGuiCol_Text] = ImVec4(0.89f, 0.90f, 0.90f, 1.00f);
-  style.Colors[ImGuiCol_TextDisabled] = ImVec4(0.60f, 0.60f, 0.60f, 1.00f);
-  style.Colors[ImGuiCol_WindowBg] = ImVec4(0.00f, 0.06f, 0.00f, 1.00f);
+  // Xenon palette: deep navy surfaces, cool white text, violet/blue accents.
+  style.Colors[ImGuiCol_Text] = ImVec4(0.93f, 0.94f, 1.00f, 1.00f);
+  style.Colors[ImGuiCol_TextDisabled] = ImVec4(0.60f, 0.64f, 0.78f, 1.00f);
+  style.Colors[ImGuiCol_WindowBg] = ImVec4(0.04f, 0.05f, 0.10f, 0.97f);
   style.Colors[ImGuiCol_ChildBg] = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
   style.Colors[ImGuiCol_BorderShadow] = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
-  style.Colors[ImGuiCol_FrameBg] = ImVec4(0.80f, 0.80f, 0.80f, 0.30f);
-  style.Colors[ImGuiCol_FrameBgHovered] = ImVec4(0.90f, 0.80f, 0.80f, 0.40f);
-  style.Colors[ImGuiCol_MenuBarBg] = ImVec4(0.00f, 0.35f, 0.00f, 1.00f);
-  style.Colors[ImGuiCol_ScrollbarBg] = ImVec4(0.00f, 0.40f, 0.11f, 0.59f);
-  style.Colors[ImGuiCol_ScrollbarGrab] = ImVec4(0.00f, 0.68f, 0.00f, 0.68f);
+  style.Colors[ImGuiCol_FrameBg] = ImVec4(1.00f, 1.00f, 1.00f, 0.07f);
+  style.Colors[ImGuiCol_FrameBgHovered] = ImVec4(0.55f, 0.60f, 1.00f, 0.18f);
+  style.Colors[ImGuiCol_MenuBarBg] = ImVec4(0.06f, 0.07f, 0.14f, 1.00f);
+  style.Colors[ImGuiCol_ScrollbarBg] = ImVec4(1.00f, 1.00f, 1.00f, 0.03f);
+  style.Colors[ImGuiCol_ScrollbarGrab] = ImVec4(0.48f, 0.55f, 1.00f, 0.45f);
   style.Colors[ImGuiCol_ScrollbarGrabHovered] =
-      ImVec4(0.00f, 1.00f, 0.15f, 0.62f);
+      ImVec4(0.55f, 0.62f, 1.00f, 0.70f);
   style.Colors[ImGuiCol_ScrollbarGrabActive] =
-      ImVec4(0.00f, 0.91f, 0.09f, 0.40f);
-  style.Colors[ImGuiCol_PopupBg] = ImVec4(0.20f, 0.20f, 0.20f, 0.99f);
+      ImVec4(0.60f, 0.48f, 1.00f, 0.85f);
+  style.Colors[ImGuiCol_PopupBg] = ImVec4(0.06f, 0.07f, 0.14f, 0.98f);
   style.Colors[ImGuiCol_ResizeGrip] = ImVec4(1.00f, 1.00f, 1.00f, 0.30f);
   style.Colors[ImGuiCol_ResizeGripHovered] = ImVec4(1.00f, 1.00f, 1.00f, 0.60f);
   style.Colors[ImGuiCol_ResizeGripActive] = ImVec4(1.00f, 1.00f, 1.00f, 0.90f);
@@ -472,11 +493,11 @@ void ImGuiDrawer::Initialize() {
   style.Colors[ImGuiCol_TabDimmedSelected] =
       style.Colors[ImGuiCol_FrameBgHovered];
   style.Colors[ImGuiCol_PlotLines] = ImVec4(1.00f, 1.00f, 1.00f, 1.00f);
-  style.Colors[ImGuiCol_PlotLinesHovered] = ImVec4(0.90f, 0.70f, 0.00f, 1.00f);
-  style.Colors[ImGuiCol_PlotHistogram] = ImVec4(0.90f, 0.70f, 0.00f, 1.00f);
+  style.Colors[ImGuiCol_PlotLinesHovered] = ImVec4(0.59f, 0.36f, 1.00f, 1.00f);
+  style.Colors[ImGuiCol_PlotHistogram] = ImVec4(0.48f, 0.55f, 1.00f, 1.00f);
   style.Colors[ImGuiCol_PlotHistogramHovered] =
-      ImVec4(1.00f, 0.60f, 0.00f, 1.00f);
-  style.Colors[ImGuiCol_ModalWindowDimBg] = ImVec4(0.20f, 0.20f, 0.20f, 0.35f);
+      ImVec4(0.59f, 0.36f, 1.00f, 1.00f);
+  style.Colors[ImGuiCol_ModalWindowDimBg] = ImVec4(0.02f, 0.02f, 0.06f, 0.60f);
   ApplyConfiguredUIAccentStyle(style);
 
   frame_time_tick_frequency_ = double(Clock::QueryHostTickFrequency());
@@ -599,17 +620,22 @@ static constexpr ImWchar font_glyph_ranges[] = {
     0,
 };
 
+// Xenon brand font, shipped in the app package (relative to install folder).
+
+ImFont* GetXenonDisplayFont() { return g_xenon_display_font; }
+
 bool ImGuiDrawer::LoadCustomFont(ImGuiIO& io, ImFontConfig& font_config,
                                  float font_size) {
-  if (cvars::custom_font_path.empty()) {
+  std::filesystem::path custom_path = cvars::custom_font_path;
+  if (custom_path.empty()) {
+    custom_path = kXenonFontPath;
+  }
+
+  if (!std::filesystem::exists(custom_path)) {
     return false;
   }
 
-  if (!std::filesystem::exists(cvars::custom_font_path)) {
-    return false;
-  }
-
-  const std::string font_path = xe::path_to_utf8(cvars::custom_font_path);
+  const std::string font_path = xe::path_to_utf8(custom_path);
   ImFont* font = io.Fonts->AddFontFromFileTTF(font_path.c_str(), font_size,
                                               &font_config, font_glyph_ranges);
 

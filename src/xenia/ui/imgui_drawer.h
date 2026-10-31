@@ -32,6 +32,9 @@ enum ImGuiKey : int;
 namespace xe {
 namespace ui {
 
+// Bold display font (Space Grotesk) for large frontend titles; may be null.
+ImFont* GetXenonDisplayFont();
+
 class ImGuiDialog;
 class ImGuiNotification;
 class Window;
