@@ -2113,10 +2113,12 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
   const float shell_margin_x = 80.0f * display_scale;
   const float shell_top = 128.0f * display_scale;
   const float shell_bottom = 104.0f * display_scale;
-  const float frontend_width = io.DisplaySize.x - shell_margin_x * 2.0f;
+  const float shell_sidebar_w = 340.0f * display_scale;
+  const float frontend_width =
+      io.DisplaySize.x - shell_sidebar_w - shell_margin_x;
   const float frontend_height = io.DisplaySize.y - shell_top - shell_bottom;
   ImGui::SetNextWindowSize(ImVec2(frontend_width, frontend_height));
-  ImGui::SetNextWindowPos(ImVec2(shell_margin_x, shell_top));
+  ImGui::SetNextWindowPos(ImVec2(shell_sidebar_w, shell_top));
 
   auto flags = ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoTitleBar |
                ImGuiWindowFlags_NoMove | ImGuiWindowFlags_AlwaysAutoResize;
@@ -2162,12 +2164,31 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
               center, radius * (1.0f - t * 0.92f), IM_COL32(r, g, b, alpha), 72);
         }
       };
-      add_glow(ImVec2(ds.x * 0.70f, ds.y * 0.28f), ds.x * 0.42f, 122, 92, 255,
-               0.30f);
-      add_glow(ImVec2(ds.x * 0.98f, ds.y * 0.90f), ds.x * 0.34f, 56, 170, 255,
-               0.22f);
-      add_glow(ImVec2(ds.x * 0.05f, ds.y * 1.05f), ds.x * 0.30f, 96, 112, 255,
-               0.14f);
+      // Each section has its own glow colors; blend smoothly between them.
+      static const float kGlowA[4][3] = {{122, 92, 255},
+                                         {70, 110, 255},
+                                         {40, 180, 205},
+                                         {200, 90, 230}};
+      static const float kGlowB[4][3] = {{56, 170, 255},
+                                         {130, 80, 255},
+                                         {60, 215, 170},
+                                         {90, 120, 255}};
+      static float glow_a[3] = {122, 92, 255};
+      static float glow_b[3] = {56, 170, 255};
+      const int glow_page =
+          std::clamp(static_cast<int>(active_frontend_page_), 0, 3);
+      const float glow_k =
+          1.0f - std::exp(-std::min(io.DeltaTime, 0.1f) * 3.0f);
+      for (int i = 0; i < 3; ++i) {
+        glow_a[i] += (kGlowA[glow_page][i] - glow_a[i]) * glow_k;
+        glow_b[i] += (kGlowB[glow_page][i] - glow_b[i]) * glow_k;
+      }
+      add_glow(ImVec2(ds.x * 0.70f, ds.y * 0.28f), ds.x * 0.42f,
+               int(glow_a[0]), int(glow_a[1]), int(glow_a[2]), 0.30f);
+      add_glow(ImVec2(ds.x * 0.98f, ds.y * 0.90f), ds.x * 0.34f,
+               int(glow_b[0]), int(glow_b[1]), int(glow_b[2]), 0.22f);
+      add_glow(ImVec2(ds.x * 0.05f, ds.y * 1.05f), ds.x * 0.30f,
+               int(glow_a[0] * 0.8f), int(glow_a[1]), int(glow_a[2]), 0.14f);
       frontend_draw_list->PopClipRect();
     }
 
@@ -8168,63 +8189,113 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
                   ImVec2(after_mark + 18.0f * s, bar_cy - 9.0f * s), kDim,
                   "SERIES X|S", 4.0f * s);
 
-      // Pill tabs with LB / RB hints.
+      // Sidebar navigation with a sliding highlight.
       const char* tab_names[4] = {"Library", "Settings", "Storage", "About"};
-      const float tab_font = 26.0f * s;
-      const float tab_pad = 28.0f * s;
-      const float tab_h = 54.0f * s;
-      const float inset = 6.0f * s;
-      float total_w = inset * 2.0f;
-      float tab_w[4];
-      for (int i = 0; i < 4; ++i) {
-        tab_w[i] = tw(ui_font, tab_font, tab_names[i]) + tab_pad * 2.0f;
-        total_w += tab_w[i];
-      }
-      const float cont_h = tab_h + inset * 2.0f;
-      const ImVec2 cont_min(ds.x * 0.5f - total_w * 0.5f, bar_cy - cont_h * 0.5f);
-      const ImVec2 cont_max(cont_min.x + total_w, cont_min.y + cont_h);
-      frontend_draw_list->AddRectFilled(cont_min, cont_max,
-                                        IM_COL32(255, 255, 255, 16),
-                                        cont_h * 0.5f);
-      frontend_draw_list->AddRect(cont_min, cont_max, IM_COL32(255, 255, 255, 30),
-                                  cont_h * 0.5f, 0, 1.5f * s);
-      float tx = cont_min.x + inset;
+      const float side_x = 48.0f * s;
+      const float side_w = 264.0f * s;
+      const float item_h = 70.0f * s;
+      const float item_gap = 10.0f * s;
+      const float list_top = 230.0f * s;
       const int active = static_cast<int>(active_frontend_page_);
-      for (int i = 0; i < 4; ++i) {
-        const ImVec2 mn(tx, cont_min.y + inset);
-        const ImVec2 mx(tx + tab_w[i], mn.y + tab_h);
-        const bool on = i == active;
-        if (on) {
-          frontend_draw_list->AddRectFilled(mn, mx, IM_COL32(122, 120, 255, 235),
-                                            tab_h * 0.5f);
-        }
-        if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
-            ImGui::IsMouseHoveringRect(mn, mx, false)) {
-          active_frontend_page_ = static_cast<FrontendPage>(i);
-        }
-        frontend_draw_list->AddText(
-            ui_font, tab_font,
-            ImVec2(mn.x + tab_pad, mn.y + (tab_h - tab_font) * 0.5f),
-            on ? IM_COL32(255, 255, 255, 255) : IM_COL32(200, 206, 236, 210),
-            tab_names[i]);
-        tx += tab_w[i];
-      }
-      auto draw_bumper = [&](const char* label, float cx) {
-        const float w = 58.0f * s, h = 38.0f * s;
-        const ImVec2 mn(cx - w * 0.5f, bar_cy - h * 0.5f);
-        const ImVec2 mx(cx + w * 0.5f, bar_cy + h * 0.5f);
-        frontend_draw_list->AddRectFilled(mn, mx, IM_COL32(255, 255, 255, 12),
+      const float dt = std::min(io.DeltaTime, 0.1f);
+      const float ease = 1.0f - std::exp(-dt * 14.0f);
+      static float pill_y = -1.0f;
+      static float item_slide[4] = {};
+      static float item_glow[4] = {};
+      const float target_y = list_top + active * (item_h + item_gap);
+      if (pill_y < 0.0f) pill_y = target_y;
+      pill_y += (target_y - pill_y) * ease;
+
+      const float list_bottom = list_top + 4.0f * (item_h + item_gap);
+      const ImVec2 panel_min(side_x - 14.0f * s, list_top - 76.0f * s);
+      const ImVec2 panel_max(side_x + side_w + 14.0f * s,
+                             list_bottom + 66.0f * s);
+      frontend_draw_list->AddRectFilled(panel_min, panel_max,
+                                        IM_COL32(255, 255, 255, 10), 24.0f * s);
+      frontend_draw_list->AddRect(panel_min, panel_max,
+                                  IM_COL32(255, 255, 255, 24), 24.0f * s, 0,
+                                  1.5f * s);
+
+      auto draw_bumper = [&](const char* label, const char* hint, float cy) {
+        const float w = 56.0f * s, h = 34.0f * s;
+        const ImVec2 mn(side_x + 14.0f * s, cy - h * 0.5f);
+        const ImVec2 mx(mn.x + w, cy + h * 0.5f);
+        frontend_draw_list->AddRectFilled(mn, mx, IM_COL32(255, 255, 255, 14),
                                           h * 0.5f);
-        frontend_draw_list->AddRect(mn, mx, IM_COL32(255, 255, 255, 40), h * 0.5f,
-                                    0, 1.5f * s);
-        const float f = 19.0f * s;
+        frontend_draw_list->AddRect(mn, mx, IM_COL32(255, 255, 255, 46),
+                                    h * 0.5f, 0, 1.5f * s);
+        const float f = 18.0f * s;
         frontend_draw_list->AddText(
             ui_font, f,
-            ImVec2(cx - tw(ui_font, f, label) * 0.5f, bar_cy - f * 0.5f), kDim,
-            label);
+            ImVec2((mn.x + mx.x - tw(ui_font, f, label)) * 0.5f, cy - f * 0.5f),
+            kDim, label);
+        frontend_draw_list->AddText(ui_font, f,
+                                    ImVec2(mx.x + 12.0f * s, cy - f * 0.5f),
+                                    IM_COL32(160, 168, 205, 150), hint);
       };
-      draw_bumper("LB", cont_min.x - 52.0f * s);
-      draw_bumper("RB", cont_max.x + 52.0f * s);
+      draw_bumper("LB", "Previous", list_top - 40.0f * s);
+      draw_bumper("RB", "Next", list_bottom + 30.0f * s);
+
+      // Highlight pill with a soft glow.
+      {
+        const ImVec2 mn(side_x, pill_y);
+        const ImVec2 mx(side_x + side_w, pill_y + item_h);
+        for (int g = 0; g < 8; ++g) {
+          const float grow = (8 - g) * 2.0f * s;
+          frontend_draw_list->AddRectFilled(
+              ImVec2(mn.x - grow, mn.y - grow), ImVec2(mx.x + grow, mx.y + grow),
+              IM_COL32(122, 110, 255, 8), item_h * 0.5f + grow);
+        }
+        frontend_draw_list->AddRectFilled(mn, mx, IM_COL32(112, 108, 255, 225),
+                                          item_h * 0.5f);
+        frontend_draw_list->AddRect(mn, mx, IM_COL32(200, 205, 255, 90),
+                                    item_h * 0.5f, 0, 1.5f * s);
+      }
+
+      for (int i = 0; i < 4; ++i) {
+        const float y = list_top + i * (item_h + item_gap);
+        const ImVec2 mn(side_x, y), mx(side_x + side_w, y + item_h);
+        const bool on = i == active;
+        const bool hovered = ImGui::IsMouseHoveringRect(mn, mx, false);
+        if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+          active_frontend_page_ = static_cast<FrontendPage>(i);
+        }
+        const float slide_target = on ? 14.0f * s : (hovered ? 6.0f * s : 0.0f);
+        item_slide[i] += (slide_target - item_slide[i]) * ease;
+        item_glow[i] += ((on ? 1.0f : 0.0f) - item_glow[i]) * ease;
+        if (hovered && !on) {
+          frontend_draw_list->AddRectFilled(mn, mx, IM_COL32(255, 255, 255, 14),
+                                            item_h * 0.5f);
+        }
+        // Small dot that grows on the active item.
+        const float dot_r = (3.0f + 2.5f * item_glow[i]) * s;
+        frontend_draw_list->AddCircleFilled(
+            ImVec2(mn.x + 30.0f * s + item_slide[i], y + item_h * 0.5f), dot_r,
+            on ? IM_COL32(255, 255, 255, 255) : IM_COL32(160, 168, 205, 140));
+        const float f = 28.0f * s;
+        const int shade = int(200 + 55 * item_glow[i]);
+        frontend_draw_list->AddText(
+            ui_font, f,
+            ImVec2(mn.x + 50.0f * s + item_slide[i], y + (item_h - f) * 0.5f),
+            IM_COL32(shade, shade, 255, int(190 + 65 * item_glow[i])),
+            tab_names[i]);
+      }
+
+      // Fade the page in when the section changes.
+      static int last_page = -1;
+      static float page_fade = 0.0f;
+      if (active != last_page) {
+        if (last_page >= 0) page_fade = 1.0f;
+        last_page = active;
+      }
+      page_fade = std::max(0.0f, page_fade - dt * 3.5f);
+      if (page_fade > 0.0f) {
+        const float a = page_fade * page_fade;
+        ImGui::GetForegroundDrawList()->AddRectFilled(
+            ImVec2(340.0f * s, 120.0f * s),
+            ImVec2(ds.x - 72.0f * s, ds.y - 96.0f * s),
+            IM_COL32(8, 10, 24, int(a * 230.0f)), 18.0f * s);
+      }
 
       // Right side: transfer status chip + clock.
       char clock[16] = "";
@@ -8283,7 +8354,7 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
         draw_hint('A', "Select");
         draw_hint('B', "Back");
       }
-      const char* version = "Xenia-Xenon v1.1.7.5";
+      const char* version = "Xenia-Xenon v1.1.7.6";
       const float vf = 20.0f * s;
       frontend_draw_list->AddText(
           ui_font, vf,
