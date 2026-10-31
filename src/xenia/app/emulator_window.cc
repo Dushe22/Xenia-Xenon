@@ -5093,6 +5093,7 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
               ImGui::TableSetupColumn("##pergame_right_col",
                                       ImGuiTableColumnFlags_WidthStretch);
               ImGui::TableNextColumn();
+              ImGui::BeginChild("##pergame_left_list", ImVec2(0.0f, ImGui::GetContentRegionAvail().y), ImGuiChildFlags_NavFlattened);
               if (per_game_config_popup_focus_requested_ ||
                   per_game_config_focus_jump_request_ ==
                       PerGameConfigFocusSide::kLeft) {
@@ -5363,8 +5364,11 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
                                   entry_control_id,
                                   false, false);
             }
+            ImGui::EndChild();
             ImGui::TableNextColumn();
             ImGui::TableNextColumn();
+            ImGui::BeginChild("##pergame_right_scroll", ImVec2(0.0f, ImGui::GetContentRegionAvail().y), ImGuiChildFlags_NavFlattened);
+            XenonGamepadScroll();
 
             const bool right_column_has_selection =
                 !per_game_config_add_preview_option_.empty() ||
@@ -5707,6 +5711,7 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
             }
 
             per_game_config_last_focused_control_id_ = per_game_focus_control_id;
+            ImGui::EndChild();
             ImGui::EndTable();
             }
 
@@ -5946,8 +5951,9 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
                    settings_plane_origin.y + settings_plane_margin));
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
         if (ImGui::BeginChild("##settings_editor_plane", settings_plane_size,
-                              false)) {
-          XenonGamepadScroll();
+                              ImGuiChildFlags_None,
+                              ImGuiWindowFlags_NoScrollbar |
+                                  ImGuiWindowFlags_NoScrollWithMouse)) {
           const float settings_content_offset_x = 15.0f * display_scale;
           ImGui::Indent(settings_content_offset_x);
           if (settings_focus_requested) {
@@ -5965,6 +5971,7 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
                                     ImGuiTableColumnFlags_WidthStretch, 1.0f);
 
             ImGui::TableNextColumn();
+            ImGui::BeginChild("##settings_left_list", ImVec2(0.0f, ImGui::GetContentRegionAvail().y), ImGuiChildFlags_NavFlattened);
             ImGui::TextWrapped("Available settings");
             bool settings_list_has_focus = false;
             bool settings_left_focus_detected = false;
@@ -6057,8 +6064,11 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
               settings_focus_on_right = true;
             }
 
+            ImGui::EndChild();
             ImGui::TableNextColumn();
             ImGui::TableNextColumn();
+            ImGui::BeginChild("##settings_right_scroll", ImVec2(0.0f, ImGui::GetContentRegionAvail().y), ImGuiChildFlags_NavFlattened);
+            XenonGamepadScroll();
 
             const bool disable_right_nav = !settings_focus_on_right;
             if (disable_right_nav) {
@@ -7785,6 +7795,7 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
               ImGui::PopItemFlag();
             }
 
+            ImGui::EndChild();
             ImGui::EndTable();
           }
           ImGui::Unindent(settings_content_offset_x);
@@ -8368,7 +8379,7 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
         draw_hint('A', "Select");
         draw_hint('B', "Back");
       }
-      const char* version = "Xenia-Xenon v1.1.7.7";
+      const char* version = "Xenia-Xenon v1.1.7.8";
       const float vf = 20.0f * s;
       frontend_draw_list->AddText(
           ui_font, vf,
