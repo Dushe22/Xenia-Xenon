@@ -596,6 +596,17 @@ struct OverlayHeaderLayout {
   ImVec2 position;
 };
 
+// Right margin of the last panel header drawn this frame; footer prompts
+// line up against it.
+struct FooterAnchor {
+  float right_x = 0.0f;
+  int frame = -1;
+};
+inline FooterAnchor& GetFooterAnchor() {
+  static FooterAnchor anchor;
+  return anchor;
+}
+
 inline OverlayHeaderLayout DrawOverlayHeader(
     ImDrawList* draw_list, const ImVec2& overlay_min, const ImVec2& panel_size,
     const ImVec2& panel_padding, float ux, float uy, const char* title,
@@ -616,6 +627,7 @@ inline OverlayHeaderLayout DrawOverlayHeader(
   const float rule_y = layout.position.y + layout.font_size + 16.0f * s;
   const float rule_x0 = layout.position.x;
   const float rule_x1 = overlay_min.x + panel_size.x - panel_padding.x;
+  GetFooterAnchor() = {rule_x1, ImGui::GetFrameCount()};
   draw_list->AddRectFilledMultiColor(
       ImVec2(rule_x0, rule_y), ImVec2(rule_x1, rule_y + 2.0f * uy),
       IM_COL32(150, 92, 255, 200), IM_COL32(56, 170, 255, 40),
@@ -648,6 +660,29 @@ inline void DrawFooterPrompt(ImDrawList* draw_list,
                              float text_size, float icon_size,
                              const char* text, float text_y, float text_x,
                              float icon_offset) {
+  const FooterAnchor& anchor = GetFooterAnchor();
+  if (anchor.frame == ImGui::GetFrameCount()) {
+    // Xenon layout: icon flush with the content's right margin, text to its
+    // left, sized like the main menu hints.
+    const float s = ImGui::GetIO().DisplaySize.x / 1920.0f;
+    const float new_text = 21.0f * s;
+    const float new_icon = 30.0f * s;
+    const float mid_y = text_y + text_size * 0.5f;
+    const float text_w = ImGui::GetFont()
+                             ->CalcTextSizeA(new_text, FLT_MAX, 0.0f, text)
+                             .x;
+    const float icon_x0 = anchor.right_x - (tex ? new_icon : 0.0f);
+    const float tx = icon_x0 - (tex ? 12.0f * s : 0.0f) - text_w;
+    DrawTextWithConfiguredEffect(draw_list, ImGui::GetFont(), new_text,
+                                 ImVec2(tx, mid_y - new_text * 0.5f),
+                                 IM_COL32(220, 226, 250, 255), text);
+    if (tex) {
+      draw_list->AddImage(reinterpret_cast<ImTextureID>(tex.get()),
+                          ImVec2(icon_x0, mid_y - new_icon * 0.5f),
+                          ImVec2(anchor.right_x, mid_y + new_icon * 0.5f));
+    }
+    return;
+  }
   DrawTextWithConfiguredEffect(draw_list, ImGui::GetFont(), text_size,
                                ImVec2(text_x, text_y),
                                IM_COL32(220, 226, 250, 255), text);
