@@ -158,6 +158,9 @@ DEFINE_string(ui_border_color, "xenon",
               "Accent color applied to UI borders, checkboxes, combo accents, and frontend headers. Options: xenon, green, purple, red, orange, blue, yellow, grey, black, white.",
               "UI");
 
+DEFINE_bool(ui_show_welcome, true,
+            "Show the Xenon welcome screen when the app starts.", "UI");
+
 DEFINE_int32(ui_xenon_theme_version, 0,
              "Internal: last Xenon theme migration applied to UI settings.",
              "UI");
@@ -254,7 +257,7 @@ namespace app {
 // Lets the right stick scroll the current window (frontend pages).
 static bool g_xenon_settings_on_right = false;
 static xe::app::xenon_settings::State* g_xenon_active_page_state = nullptr;
-static constexpr char kXenonVersion[] = "1.1.8.3";
+static constexpr char kXenonVersion[] = "1.1.8.4";
 static bool g_xenon_pergame_on_right = false;
 
 static void XenonGamepadScroll() {
@@ -2126,6 +2129,197 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
       }
     }
     config::SaveConfig();
+  }
+
+  // ---- Xenon welcome screen (shown at startup) ------------------------
+  {
+    static bool welcome_visible = cvars::ui_show_welcome;
+    static float welcome_time = 0.0f;
+    static float welcome_out = -1.0f;  // >= 0 while fading out.
+    if (welcome_visible) {
+      const float s = display_scale;
+      const ImVec2 ds = io.DisplaySize;
+      const float dt = std::min(io.DeltaTime, 0.1f);
+      welcome_time += dt;
+      float alpha = std::min(1.0f, welcome_time / 0.45f);
+      if (welcome_out >= 0.0f) {
+        welcome_out += dt;
+        alpha = std::max(0.0f, 1.0f - welcome_out / 0.3f);
+      }
+      const float rise = (1.0f - alpha) * 24.0f * s;
+      auto A = [&](int r, int g, int b, int a) {
+        return IM_COL32(r, g, b, int(a * alpha));
+      };
+
+      ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
+      ImGui::SetNextWindowSize(ds);
+      ImGui::SetNextWindowFocus();
+      ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+      ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+      ImGui::Begin("##xenon_welcome", nullptr,
+                   ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
+                       ImGuiWindowFlags_NoSavedSettings |
+                       ImGuiWindowFlags_NoBackground |
+                       ImGuiWindowFlags_NoNav);
+      ImDrawList* dl = ImGui::GetWindowDrawList();
+      ImFont* ui_font = ImGui::GetFont();
+      ImFont* display_font = xe::ui::GetXenonDisplayFont();
+      if (!display_font) display_font = ui_font;
+
+      // Background: navy with xenon glows (opaque while not fading out).
+      const int bg_a = welcome_out >= 0.0f ? int(255 * alpha) : 255;
+      dl->AddRectFilledMultiColor(
+          ImVec2(0, 0), ds, IM_COL32(10, 12, 26, bg_a),
+          IM_COL32(16, 12, 38, bg_a), IM_COL32(6, 8, 18, bg_a),
+          IM_COL32(6, 10, 22, bg_a));
+      auto glow = [&](ImVec2 c, float radius, int r, int g, int b, float k) {
+        for (int i = 0; i < 28; ++i) {
+          const float f = float(i) / 28.0f;
+          dl->AddCircleFilled(c, radius * (1.0f - f * 0.92f),
+                              IM_COL32(r, g, b, int(k * 255 / 28 * alpha)),
+                              72);
+        }
+      };
+      const float pulse = 0.5f + 0.5f * std::sin(welcome_time * 1.4f);
+      glow(ImVec2(ds.x * 0.72f, ds.y * 0.30f), ds.x * 0.45f, 122, 92, 255,
+           0.28f + 0.06f * pulse);
+      glow(ImVec2(ds.x * 0.95f, ds.y * 0.95f), ds.x * 0.35f, 56, 170, 255,
+           0.22f);
+
+      const float left = 150.0f * s;
+      float y = ds.y * 0.20f + rise;
+
+      // Logo + eyebrow.
+      if (auto logo = GetOrCreateImageTexture("Assets/xenon-logo-white.png")) {
+        const float ls = 120.0f * s;
+        dl->AddImage(reinterpret_cast<ImTextureID>(logo.get()), ImVec2(left, y),
+                     ImVec2(left + ls, y + ls), ImVec2(0, 0), ImVec2(1, 1),
+                     A(255, 255, 255, 255));
+      }
+      y += 150.0f * s;
+      {
+        float x = left;
+        char ch[2] = {0, 0};
+        for (const char* p = "WELCOME TO"; *p; ++p) {
+          ch[0] = *p;
+          dl->AddText(ui_font, 22.0f * s, ImVec2(x, y), A(170, 178, 220, 255),
+                      ch, ch + 1);
+          x += ui_font->CalcTextSizeA(22.0f * s, FLT_MAX, 0.0f, ch, ch + 1).x +
+               6.0f * s;
+        }
+      }
+      y += 40.0f * s;
+      dl->AddText(display_font, 104.0f * s, ImVec2(left - 4.0f * s, y),
+                  A(240, 243, 255, 255), "Xenia-Xenon");
+      y += 124.0f * s;
+      dl->AddText(ui_font, 30.0f * s, ImVec2(left, y), A(180, 188, 225, 255),
+                  "Xbox 360 emulation, built for Xbox Series X|S.");
+      y += 90.0f * s;
+
+      // Feature cards.
+      struct Card {
+        const char* title;
+        const char* body;
+      };
+      const Card cards[] = {
+          {"Your library",
+           "Games in your game folders and the internal storage show up "
+           "automatically."},
+          {"Copy games over Wi-Fi",
+           "Turn on Web transfer in Storage, then open the address from a PC "
+           "or phone."},
+          {"Made for the controller",
+           "Settings, storage and per-game options you can tune from the "
+           "couch."},
+      };
+      const float card_w = 420.0f * s, card_h = 150.0f * s,
+                  card_gap = 28.0f * s;
+      for (int i = 0; i < 3; ++i) {
+        const float cx = left + i * (card_w + card_gap);
+        const float cy = y + rise * (0.5f + i * 0.4f);
+        const ImVec2 mn(cx, cy), mx(cx + card_w, cy + card_h);
+        dl->AddRectFilled(mn, mx, A(255, 255, 255, 14), 20.0f * s);
+        dl->AddRect(mn, mx, A(255, 255, 255, 34), 20.0f * s, 0, 1.5f * s);
+        dl->AddRectFilled(ImVec2(cx + 26.0f * s, cy + 30.0f * s),
+                          ImVec2(cx + 34.0f * s, cy + 58.0f * s),
+                          A(122, 120, 255, 255), 4.0f * s);
+        dl->AddText(ui_font, 27.0f * s, ImVec2(cx + 48.0f * s, cy + 28.0f * s),
+                    A(240, 243, 255, 255), cards[i].title);
+        dl->AddText(ui_font, 21.0f * s, ImVec2(cx + 26.0f * s, cy + 74.0f * s),
+                    A(170, 178, 220, 255), cards[i].body, nullptr,
+                    card_w - 52.0f * s);
+      }
+      y += card_h + 70.0f * s;
+
+      // Start playing button.
+      bool start = false;
+      {
+        const char* label = "Start playing";
+        const float h = 78.0f * s, f = 32.0f * s, icon = 40.0f * s;
+        const float w = ui_font->CalcTextSizeA(f, FLT_MAX, 0.0f, label).x +
+                        icon + 100.0f * s;
+        const ImVec2 mn(left, y), mx(left + w, y + h);
+        for (int g = 0; g < 10; ++g) {
+          const float grow = (10 - g) * 2.4f * s * (0.6f + 0.4f * pulse);
+          dl->AddRectFilled(ImVec2(mn.x - grow, mn.y - grow),
+                            ImVec2(mx.x + grow, mx.y + grow),
+                            A(122, 120, 255, 10), h * 0.5f + grow);
+        }
+        dl->AddRectFilled(mn, mx, A(246, 247, 255, 255), h * 0.5f);
+        dl->AddText(ui_font, f, ImVec2(left + 40.0f * s, y + (h - f) * 0.5f),
+                    A(12, 14, 30, 255), label);
+        if (auto a_tex = GetOrCreateButtonTexture('A')) {
+          const float ix = mx.x - 26.0f * s - icon;
+          dl->AddImage(reinterpret_cast<ImTextureID>(a_tex.get()),
+                       ImVec2(ix, y + (h - icon) * 0.5f),
+                       ImVec2(ix + icon, y + (h + icon) * 0.5f), ImVec2(0, 0),
+                       ImVec2(1, 1), A(255, 255, 255, 255));
+        }
+        if (ImGui::IsMouseHoveringRect(mn, mx) &&
+            ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+          start = true;
+        }
+        // Secondary hint: hide this screen next time.
+        if (auto y_tex = GetOrCreateButtonTexture('Y')) {
+          const float hx = mx.x + 48.0f * s, hy = y + (h - 34.0f * s) * 0.5f;
+          dl->AddImage(reinterpret_cast<ImTextureID>(y_tex.get()),
+                       ImVec2(hx, hy), ImVec2(hx + 34.0f * s, hy + 34.0f * s),
+                       ImVec2(0, 0), ImVec2(1, 1), A(255, 255, 255, 255));
+          dl->AddText(ui_font, 23.0f * s,
+                      ImVec2(hx + 46.0f * s, y + (h - 23.0f * s) * 0.5f),
+                      A(170, 178, 220, 255), "Don't show this again");
+        }
+      }
+      ImGui::End();
+      ImGui::PopStyleVar(2);
+
+      if (welcome_out < 0.0f && welcome_time > 0.25f) {
+        const bool hide_next_time =
+            ImGui::IsKeyPressed(ImGuiKey_GamepadFaceUp, false);
+        if (start || hide_next_time ||
+            ImGui::IsKeyPressed(ImGuiKey_GamepadFaceDown, false) ||
+            ImGui::IsKeyPressed(ImGuiKey_Enter, false) ||
+            ImGui::IsKeyPressed(ImGuiKey_Space, false)) {
+          if (hide_next_time) {
+            auto it = cvar::ConfigVars->find("ui_show_welcome");
+            if (it != cvar::ConfigVars->end()) {
+              if (auto cv = dynamic_cast<cvar::ConfigVar<bool>*>(it->second)) {
+                cv->SetConfigValue(false);
+                config::SaveConfig();
+              }
+            }
+          }
+          welcome_out = 0.0f;
+        }
+      }
+      if (welcome_out >= 0.3f) {
+        welcome_visible = false;
+      }
+      // While the welcome screen is up, nothing else reacts to input.
+      if (welcome_visible && welcome_out < 0.0f) {
+        return;
+      }
+    }
   }
 
   // Xenon shell: the page area sits between the top bar and the footer.
@@ -6234,9 +6428,15 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
       frontend_draw_list->AddLine(ImVec2(sidebar_panel_w, 0.0f),
                                   ImVec2(sidebar_panel_w, ds.y),
                                   IM_COL32(255, 255, 255, 26), 1.5f * s);
-      draw_spaced(brand_font, mark_size, ImVec2(44.0f * s, 52.0f * s), kText,
-                  "XENON", 10.0f * s);
-      draw_spaced(ui_font, 17.0f * s, ImVec2(46.0f * s, 100.0f * s), kDim,
+      if (auto logo = GetOrCreateImageTexture("Assets/xenon-logo-white.png")) {
+        const float ls = 68.0f * s;
+        frontend_draw_list->AddImage(
+            reinterpret_cast<ImTextureID>(logo.get()),
+            ImVec2(30.0f * s, 46.0f * s), ImVec2(30.0f * s + ls, 46.0f * s + ls));
+      }
+      draw_spaced(brand_font, mark_size, ImVec2(110.0f * s, 52.0f * s), kText,
+                  "XENON", 9.0f * s);
+      draw_spaced(ui_font, 16.0f * s, ImVec2(112.0f * s, 98.0f * s), kDim,
                   "SERIES X|S", 5.0f * s);
 
       // Sidebar navigation with a sliding highlight.

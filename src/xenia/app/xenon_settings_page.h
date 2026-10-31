@@ -328,7 +328,8 @@ inline const std::vector<Category>& Categories() {
                 0, 1, 0.01, "%.2f")}});
     c.push_back(
         {"Interface",
-         {Toggle("Achievement pop-ups", "show_achievement_notification"),
+         {Toggle("Welcome screen on start", "ui_show_welcome"),
+          Toggle("Achievement pop-ups", "show_achievement_notification"),
           Toggle("Storage selection dialog", "storage_selection_dialog"),
           Toggle("Dynamic game backgrounds",
                  "ui_enable_dynamic_game_backgrounds"),
@@ -471,6 +472,8 @@ inline const std::vector<Category>& Categories() {
          "How far the left trigger must be pressed before it registers."},
         {"right_trigger_deadzone_percentage",
          "How far the right trigger must be pressed before it registers."},
+        {"ui_show_welcome",
+         "Shows the welcome screen with the Start playing button each time Xenon opens."},
         {"show_achievement_notification",
          "Shows a pop-up when you unlock an achievement."},
         {"storage_selection_dialog",
