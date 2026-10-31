@@ -13,6 +13,7 @@
 #include "third_party/stb/stb_image.h"
 #include "xenia/base/cvar.h"
 #include "xenia/ui/imgui_drawer.h"
+#include "xenia/ui/imgui_drawer.h"
 
 namespace xe {
 namespace app {
@@ -557,14 +558,33 @@ inline void DrawGuidePanelBackground(
     ImDrawList* draw_list,
     const std::shared_ptr<ui::ImmediateTexture>& guide_texture,
     const ImVec2& overlay_min, const ImVec2& overlay_max) {
-  if (guide_texture) {
-    draw_list->AddImage(reinterpret_cast<ImTextureID>(guide_texture.get()),
-                        overlay_min, overlay_max);
-  } else {
-    draw_list->AddRectFilled(
-        overlay_min, overlay_max,
-        ImGui::GetColorU32(ImVec4(0.10f, 0.12f, 0.14f, 0.92f)));
+  static_cast<void>(guide_texture);
+  const ImVec2 display = ImGui::GetIO().DisplaySize;
+  const float s = display.x / 1920.0f;
+  // Dim whatever is behind the panel.
+  if (overlay_max.x < display.x) {
+    draw_list->AddRectFilled(ImVec2(overlay_max.x, overlay_min.y),
+                             ImVec2(display.x, overlay_max.y),
+                             IM_COL32(4, 5, 12, 150));
   }
+  // Navy glass panel.
+  draw_list->AddRectFilledMultiColor(
+      overlay_min, overlay_max, IM_COL32(16, 18, 40, 250),
+      IM_COL32(12, 14, 32, 250), IM_COL32(8, 10, 22, 250),
+      IM_COL32(10, 12, 28, 250));
+  // Soft violet glow in the top corner.
+  for (int i = 0; i < 20; ++i) {
+    const float t = float(i) / 20.0f;
+    draw_list->AddCircleFilled(
+        ImVec2(overlay_max.x * 0.85f, overlay_min.y + 60.0f * s),
+        (overlay_max.x - overlay_min.x) * 0.55f * (1.0f - t * 0.9f),
+        IM_COL32(122, 92, 255, 4), 64);
+  }
+  // Xenon edge line on the right.
+  draw_list->AddRectFilledMultiColor(
+      ImVec2(overlay_max.x - 3.0f * s, overlay_min.y), overlay_max,
+      IM_COL32(150, 92, 255, 230), IM_COL32(150, 92, 255, 230),
+      IM_COL32(56, 170, 255, 230), IM_COL32(56, 170, 255, 230));
 }
 
 struct OverlayHeaderLayout {
@@ -580,9 +600,19 @@ inline OverlayHeaderLayout DrawOverlayHeader(
                                 ImVec2(overlay_min.x + 30.0f * ux,
                                        overlay_min.y + 18.0f * uy)};
   ImFont* header_font = ImGui::GetFont();
-  const ImU32 header_color = IM_COL32(228, 228, 228, 255);
-  DrawTextWithConfiguredEffect(draw_list, header_font, layout.font_size,
-                               layout.position, header_color, title);
+  ImFont* title_font = xe::ui::GetXenonDisplayFont();
+  if (!title_font) title_font = header_font;
+  const ImU32 header_color = IM_COL32(240, 243, 255, 255);
+  draw_list->AddText(title_font, layout.font_size * 1.15f, layout.position,
+                     header_color, title);
+  // Accent rule under the header.
+  const float rule_y = layout.position.y + layout.font_size * 1.15f + 14.0f * uy;
+  const float rule_x0 = layout.position.x;
+  const float rule_x1 = overlay_min.x + panel_size.x - 40.0f * ux;
+  draw_list->AddRectFilledMultiColor(
+      ImVec2(rule_x0, rule_y), ImVec2(rule_x1, rule_y + 2.0f * uy),
+      IM_COL32(150, 92, 255, 200), IM_COL32(56, 170, 255, 40),
+      IM_COL32(56, 170, 255, 40), IM_COL32(150, 92, 255, 200));
 
   if (!draw_clock) {
     return layout;
@@ -598,9 +628,9 @@ inline OverlayHeaderLayout DrawOverlayHeader(
       clock_text.c_str(), nullptr, nullptr);
   const float clock_x = overlay_min.x + panel_size.x - panel_padding.x -
                         clock_size.x - (40.0f * ux);
-  DrawTextWithConfiguredEffect(draw_list, header_font, layout.font_size,
-                               ImVec2(clock_x, layout.position.y),
-                               header_color, clock_text.c_str());
+  draw_list->AddText(header_font, layout.font_size * 0.8f,
+                     ImVec2(clock_x, layout.position.y + layout.font_size * 0.2f),
+                     IM_COL32(160, 168, 205, 255), clock_text.c_str());
   return layout;
 }
 
@@ -611,7 +641,7 @@ inline void DrawFooterPrompt(ImDrawList* draw_list,
                              float icon_offset) {
   DrawTextWithConfiguredEffect(draw_list, ImGui::GetFont(), text_size,
                                ImVec2(text_x, text_y),
-                               IM_COL32(205, 205, 205, 255), text);
+                               IM_COL32(220, 226, 250, 255), text);
   if (!tex) {
     return;
   }
