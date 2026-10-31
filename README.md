@@ -1,33 +1,51 @@
 <p align="center">
-    <a href="https://github.com/xenia-canary/xenia-canary/tree/canary_experimental/assets/icon">
-        <img height="256px" src="https://raw.githubusercontent.com/xenia-canary/xenia/master/assets/icon/256.png" />
-    </a>
+    <img height="200px" src="docs/xenon/logo.png" alt="Xenia-Xenon logo" />
 </p>
 
 <h1 align="center">Xenia-Xenon</h1>
 
+<p align="center">Xbox 360 emulation for <b>Xbox Series X|S in Dev Mode</b> (UWP, Direct3D 12).</p>
+
 Xenia-Xenon is an unofficial fork of [Xenia Canary](https://github.com/xenia-canary/xenia-canary)
-for **Xbox Series X|S in Dev Mode** (UWP, Direct3D 12). It builds on the Xenia Canary UWP port
-(Blades frontend) and is not associated with the Xenia developers.
+built on the Xenia Canary UWP port. It is not associated with the Xenia developers.
+
+<p align="center">
+    <img width="49%" src="docs/xenon/settings.jpg" alt="Settings screen" />
+    <img width="49%" src="docs/xenon/web-transfer.jpg" alt="Web transfer page" />
+</p>
 
 ## Features
 
-- **Internal game storage.** Games live in `D:\DevelopmentFiles\XeniaCanary\Games`, the large
-  Dev Mode partition (~180 GB on Series X|S). They show up in the game list automatically.
-- **Web file transfer.** A built-in file manager you open from any browser (PC or phone) on the
-  same network. Drag in ISO / ZAR / GOD files or whole extracted game folders, with progress,
-  rename, delete, download and free-space display. No internet or extra software needed.
+- **Console-first interface.** Sidebar with Library, Settings, Storage and About, made for the
+  controller: LB/RB switch sections, the settings list stays put while only the options scroll,
+  and every option has a plain-language description.
+- **Own package.** Installs as **Xenia Xenon**, next to Xenia Canary without replacing it.
+- **Internal game storage.** Games live in `D:\DevelopmentFiles\XeniaXenon\Games`, on the large
+  Dev Mode partition (~180 GB on Series X|S), and show up in the library automatically.
+- **Web file transfer.** A file manager you open from any browser (PC or phone) on the same
+  network. Drop ISO / ZAR / GOD files or whole game folders, with progress, rename, delete,
+  download and free space. No internet or extra software needed.
+- **Config backups.** Export your settings from **Storage → Config backups**, import or delete
+  them later, or copy them to a PC through the web transfer page.
+- **Game mode check.** If the console runs Xenon as an *App* (1 GB memory limit), it tells you
+  how to switch it to *Game* instead of closing.
+
+<p align="center">
+    <img width="49%" src="docs/xenon/profiles.jpg" alt="Profile dialog" />
+    <img width="49%" src="docs/xenon/game-mode-notice.jpg" alt="Game mode notice" />
+</p>
 
 ## Installing on Xbox (Dev Mode)
 
 1. Put the console in Dev Mode and open Device Portal (`https://<console-ip>:11443`).
 2. **Add** the `.appx` plus the `Microsoft.VCLibs.x64.14.00.appx` dependency.
-3. In Dev Home, select **Xenia Canary** → Menu → **View details** → set **App type** to **Game**.
-   As an "App" it gets too little memory and closes on start.
+3. In Dev Home, highlight **Xenia Xenon** → View button → **View details** → set **App type** to
+   **Game**. Updates can reset this, so check it again after installing a new version.
 
 ## Copying games to the console
 
-1. Open Xenia → **paths** tab → **Start Transfer Server** (it stays on for next launches).
+1. Open Xenon → **Storage** → **Web transfer** and turn the transfer server on (it stays on for
+   the next launches).
 2. Open the address shown (e.g. `http://192.168.1.20:8080`) in a browser on the same network.
 3. Drop games into the **Games** section. A wired connection gives the best speed.
 
@@ -46,6 +64,11 @@ msbuild xenia-canary-uwp\xenia-canary-uwp.vcxproj /p:Configuration=Release /p:Pl
 
 Restore the `Microsoft.Windows.CppWinRT` NuGet package into `build\packages` first, and sign the
 resulting `.appx` with a certificate whose subject matches the manifest publisher.
+
+## Credits
+
+Xenia and its contributors for the emulator, SirMangler for the original UWP port, danprice142
+for the Xenia Canary UWP port, and Florian Karsten for the Space Grotesk font (SIL OFL).
 
 <h1>Original Readme</h1>
 
@@ -86,24 +109,6 @@ screenshots, and information there following the [existing conventions](https://
 See [building.md](docs/building.md) for setup and information about the
 `xb` script. When writing code, check the [style guide](docs/style_guide.md)
 and be sure to run clang-format!
-
-## Contributors Wanted!
-
-Have some spare time, know advanced C++, and want to write an emulator?
-Contribute! There's a ton of work that needs to be done, a lot of which
-is wide open greenfield fun.
-
-**For general rules and guidelines please see [CONTRIBUTING.md](.github/CONTRIBUTING.md).**
-
-Fixes and optimizations are always welcome (please!), but in addition to
-that there are some major work areas still untouched:
-
-* Help work through [missing functionality/bugs in games](https://github.com/xenia-canary/xenia-canary/labels/compat)
-* Reduce the size of Xenia's [huge log files](https://github.com/xenia-canary/xenia-canary/issues/1526)
-* Skilled with Linux? A strong contributor is needed to [help with porting](https://github.com/xenia-canary/xenia-canary/labels/platform-linux)
-
-See more projects [good for contributors](https://github.com/xenia-canary/xenia-canary/labels/good%20first%20issue). It's a good idea to ask on Discord and check the issues page before beginning work on
-something.
 
 ## Disclaimer
 
