@@ -607,7 +607,6 @@ inline OverlayHeaderLayout DrawOverlayHeader(
                                 ImVec2(overlay_min.x + panel_padding.x,
                                        overlay_min.y + 44.0f * s)};
   ImFont* header_font = ImGui::GetFont();
-  ImGui::SetWindowFontScale((24.0f * s) / header_font->FontSize);
   ImFont* title_font = xe::ui::GetXenonDisplayFont();
   if (!title_font) title_font = header_font;
   const ImU32 header_color = IM_COL32(238, 241, 255, 255);
