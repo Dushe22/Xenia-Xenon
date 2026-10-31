@@ -263,7 +263,7 @@ namespace app {
 
 // Lets the right stick scroll the current window (frontend pages).
 static xe::app::xenon_settings::State* g_xenon_active_page_state = nullptr;
-static constexpr char kXenonVersion[] = "1.2.1.0";
+static constexpr char kXenonVersion[] = "1.2.1.1";
 static bool g_xenon_pergame_on_right = false;
 
 static void XenonGamepadScroll() {
@@ -4063,6 +4063,13 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
             ImVec2 cover_max(item_min.x + card_w, item_min.y + card_h);
             if (is_selected) {
               // Xenon glow + white focus ring around the selected cover.
+              // The glow reaches past the row's edges, so lift the clip rect
+              // while drawing it; otherwise its rounded corners get cut flat.
+              const float max_grow = 10 * 2.2f * s;
+              row_draw_list->PushClipRect(
+                  ImVec2(cover_min.x - max_grow, cover_min.y - max_grow),
+                  ImVec2(cover_max.x + max_grow, cover_max.y + max_grow),
+                  false);
               for (int g = 0; g < 10; ++g) {
                 const float grow = (10 - g) * 2.2f * s;
                 row_draw_list->AddRectFilled(
@@ -4070,6 +4077,7 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
                     ImVec2(cover_max.x + grow, cover_max.y + grow),
                     IM_COL32(122, 120, 255, 9), rounding + grow);
               }
+              row_draw_list->PopClipRect();
             }
             const std::string display_title = get_game_display_title(row);
             draw_cover(get_cover_art(row), cover_min, cover_max, rounding,

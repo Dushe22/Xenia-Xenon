@@ -1033,9 +1033,13 @@ inline bool Draw(State& st, const std::vector<Category>& cats, float s,
     if (y + row_h < rows_top - row_h || y > rows_bottom) continue;
     const ImVec2 mn(pane_x, y), mx(pane_x + pane_w, y + row_h);
     const bool selected = i == st.row;
-    if (!selected) {
-      dl->AddRectFilled(mn, mx, IM_COL32(255, 255, 255, 9), 16.0f * s);
-    }
+    // The selected row's base fill fades back in as the highlight fades out
+    // (pane inactive), so it never ends up without a background.
+    dl->AddRectFilled(mn, mx,
+                      selected ? with_alpha(IM_COL32(255, 255, 255, 9),
+                                            1.0f - st.pane_mix)
+                               : IM_COL32(255, 255, 255, 9),
+                      16.0f * s);
     if (ImGui::IsMouseHoveringRect(mn, mx) &&
         ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !st.editing_text) {
       st.in_options = true;
