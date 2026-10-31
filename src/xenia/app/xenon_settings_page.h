@@ -448,7 +448,7 @@ inline const std::vector<Category>& Categories() {
          "running."},
         {"ui_language",
          "Language of the Xenon menus. Automatic follows the console's "
-         "language. Restart Xenon to finish applying it."},
+         "language."},
         {"draw_resolution_scale_x",
          "Renders games at a multiple of their original resolution (sets width "
          "and height together). Higher looks sharper but needs much more GPU; "

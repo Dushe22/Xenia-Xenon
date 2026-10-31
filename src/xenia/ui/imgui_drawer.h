@@ -115,6 +115,8 @@ class ImGuiDrawer : public WindowInputListener, public UIDrawer {
 
  private:
   void Initialize();
+  // Loads every font into the atlas for the current UI language.
+  void BuildFonts();
   void InitializeFonts(const float font_size);
   bool LoadCustomFont(ImGuiIO& io, ImFontConfig& font_config, float font_size);
   bool LoadWindowsFont(ImGuiIO& io, ImFontConfig& font_config, float font_size);
@@ -161,6 +163,8 @@ class ImGuiDrawer : public WindowInputListener, public UIDrawer {
   // Resources specific to an immediate drawer - must be destroyed before
   // detaching the presenter.
   std::unique_ptr<ImmediateTexture> font_texture_;
+  // UI language the font atlas was built for (an i18n::Language value).
+  int fonts_language_ = -1;
   std::unique_ptr<ImmediateTexture> locked_achievement_icon_;
 
   std::vector<std::unique_ptr<ImmediateTexture>> notification_icon_textures_;

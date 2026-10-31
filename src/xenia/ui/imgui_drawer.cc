@@ -444,21 +444,7 @@ void ImGuiDrawer::Initialize() {
   io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
   io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 
-  const float font_size = std::max((float)cvars::font_size, 8.f);
-  const float title_font_size = font_size + 6.f;
-
-  InitializeFonts(font_size);
-  InitializeFonts(title_font_size);
-
-  // Large bold face for frontend hero titles and the wordmark.
-  if (std::filesystem::exists(kXenonDisplayFontPath)) {
-    ImFontConfig display_config;
-    display_config.OversampleH = display_config.OversampleV = 2;
-    g_xenon_display_font = io.Fonts->AddFontFromFileTTF(
-        kXenonDisplayFontPath, 72.0f, &display_config,
-        io.Fonts->GetGlyphRangesDefault());
-    MergeLanguageFonts(io, 72.0f, true);
-  }
+  BuildFonts();
 
 #ifdef XE_PLATFORM_LINUX
   io.SetClipboardTextFn = SetClipboardText;
@@ -650,9 +636,11 @@ ImFont* GetXenonDisplayFont() { return g_xenon_display_font; }
 // Merges Noto glyphs for languages Space Grotesk doesn't cover. Only the
 // current language gets its full text; the others just need their own name
 // for the language picker.
+// Glyph ranges must outlive the atlas build; cleared when the atlas is.
+static std::list<ImVector<ImWchar>> g_language_ranges;
+
 static void MergeLanguageFonts(ImGuiIO& io, float font_size, bool bold) {
-  // Glyph ranges must outlive the atlas build.
-  static std::list<ImVector<ImWchar>> ranges_storage;
+  auto& ranges_storage = g_language_ranges;
   const i18n::Language current = i18n::CurrentLanguage();
   for (int i = 0; i < int(i18n::Language::kCount); ++i) {
     const auto language = i18n::Language(i);
@@ -874,6 +862,28 @@ bool ImGuiDrawer::LoadJapaneseFont(ImGuiIO& io, float font_size) {
   return false;
 };
 
+void ImGuiDrawer::BuildFonts() {
+  auto& io = ImGui::GetIO();
+  fonts_language_ = int(i18n::CurrentLanguage());
+
+  const float font_size = std::max((float)cvars::font_size, 8.f);
+  const float title_font_size = font_size + 6.f;
+
+  InitializeFonts(font_size);
+  InitializeFonts(title_font_size);
+
+  // Large bold face for frontend hero titles and the wordmark.
+  g_xenon_display_font = nullptr;
+  if (std::filesystem::exists(kXenonDisplayFontPath)) {
+    ImFontConfig display_config;
+    display_config.OversampleH = display_config.OversampleV = 2;
+    g_xenon_display_font = io.Fonts->AddFontFromFileTTF(
+        kXenonDisplayFontPath, 72.0f, &display_config,
+        io.Fonts->GetGlyphRangesDefault());
+    MergeLanguageFonts(io, 72.0f, true);
+  }
+}
+
 void ImGuiDrawer::InitializeFonts(const float font_size) {
   auto& io = ImGui::GetIO();
 
@@ -1007,6 +1017,18 @@ void ImGuiDrawer::Draw(UIDrawContext& ui_draw_context) {
 
   if (!dialogs_.empty()) {
     UpdateGamepads();
+  }
+
+  // Switching the UI language needs that language's glyphs (Cyrillic, CJK) in
+  // the atlas, so rebuild it between frames. The old texture is released once
+  // the GPU is done with it.
+  if (int(i18n::CurrentLanguage()) != fonts_language_) {
+    io.Fonts->Clear();
+    g_language_ranges.clear();
+    BuildFonts();
+    io.Fonts->Build();
+    font_texture_.reset();
+    SetupFontTexture();
   }
 
   ImGui::NewFrame();
