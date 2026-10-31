@@ -4,7 +4,48 @@
     </a>
 </p>
 
-Xenia Canary UWP is an unofficial fork of Xenia Canary to support UWP and the Xbox platforms. It is not associated with the Xenia developers.
+<h1 align="center">Xenia-Xenon</h1>
+
+Xenia-Xenon is an unofficial fork of [Xenia Canary](https://github.com/xenia-canary/xenia-canary)
+for **Xbox Series X|S in Dev Mode** (UWP, Direct3D 12). It builds on the Xenia Canary UWP port
+(Blades frontend) and is not associated with the Xenia developers.
+
+## Features
+
+- **Internal game storage.** Games live in `D:\DevelopmentFiles\XeniaCanary\Games`, the large
+  Dev Mode partition (~180 GB on Series X|S). They show up in the game list automatically.
+- **Web file transfer.** A built-in file manager you open from any browser (PC or phone) on the
+  same network. Drag in ISO / ZAR / GOD files or whole extracted game folders, with progress,
+  rename, delete, download and free-space display. No internet or extra software needed.
+
+## Installing on Xbox (Dev Mode)
+
+1. Put the console in Dev Mode and open Device Portal (`https://<console-ip>:11443`).
+2. **Add** the `.appx` plus the `Microsoft.VCLibs.x64.14.00.appx` dependency.
+3. In Dev Home, select **Xenia Canary** → Menu → **View details** → set **App type** to **Game**.
+   As an "App" it gets too little memory and closes on start.
+
+## Copying games to the console
+
+1. Open Xenia → **paths** tab → **Start Transfer Server** (it stays on for next launches).
+2. Open the address shown (e.g. `http://192.168.1.20:8080`) in a browser on the same network.
+3. Drop games into the **Games** section. A wired connection gives the best speed.
+
+## Building
+
+Needs Visual Studio 2022 Build Tools with *C++ (v143) Universal Windows Platform tools* and a
+Windows 10/11 SDK.
+
+```
+git submodule update --init --depth 1
+python xenia-build.py premake
+msbuild xenia-canary-uwp\xenia-canary-uwp.vcxproj /p:Configuration=Release /p:Platform=x64 ^
+  /p:SolutionDir=%CD%\xenia-canary-uwp\ /p:WindowsTargetPlatformVersion=10.0.26100.0 ^
+  /p:AppxBundle=Never /p:UapAppxPackageBuildMode=SideloadOnly
+```
+
+Restore the `Microsoft.Windows.CppWinRT` NuGet package into `build\packages` first, and sign the
+resulting `.appx` with a certificate whose subject matches the manifest publisher.
 
 <h1>Original Readme</h1>
 
