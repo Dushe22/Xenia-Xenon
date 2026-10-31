@@ -265,6 +265,8 @@
     <ClInclude Include="window_uwp.h" />
     <ClInclude Include="WinRTKeyboard.h" />
     <ClInclude Include="XeniaUWP.h" />
+    <ClInclude Include="WebTransferPage.h" />
+    <ClInclude Include="WebTransferServer.h" />
   </ItemGroup>
   <ItemGroup>
     <AppxManifest Include="Package.appxmanifest">
@@ -307,6 +309,7 @@
     <ClCompile Include="window_uwp.cc" />
     <ClCompile Include="WinRTKeyboard.cpp" />
     <ClCompile Include="XeniaUWP.cpp" />
+    <ClCompile Include="WebTransferServer.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />

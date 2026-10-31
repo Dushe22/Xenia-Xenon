@@ -8,7 +8,12 @@
 #include <cctype>
 #include <fstream>
 
+#include "WebTransferServer.h"
 #include "windowed_app_context_uwp.h"
+
+#include <winrt/Windows.Foundation.Collections.h>
+#include <winrt/Windows.Networking.h>
+#include <winrt/Windows.Networking.Connectivity.h>
 #include "surface_uwp.h"
 #include "window_uwp.h"
 
@@ -36,6 +41,11 @@ using namespace xe::hid;
 DECLARE_string(gamepaths);
 DEFINE_string(gamepaths, "", "Paths the frontend will search for games.",
               "General");
+DEFINE_bool(web_transfer_enabled, false,
+            "Start the LAN web file-transfer server when the app opens.",
+            "General");
+DEFINE_int32(web_transfer_port, 8080, "Port for the LAN web file-transfer server.",
+             "General");
 
 static std::unique_ptr<ui::WindowedApp> app = nullptr;
 static std::unique_ptr<ui::UWPWindowedAppContext> app_context = nullptr;
@@ -44,6 +54,8 @@ static Emulator* s_emulator;
 static std::vector<std::string> s_paths;
 static std::vector<std::tuple<std::string, std::string>> s_games;
 static std::vector<std::string> s_scanned_paths;
+static UWP::WebTransferServer s_web_transfer;
+static std::atomic<bool> s_refresh_pending{false};
 
 namespace {
 constexpr uint64_t kAnalogNavInitialDelayMs = 275;
@@ -144,7 +156,12 @@ void UWP::StartXenia() {
   xe::InitializeWin32App(app->GetName());
 
   if (app->OnInitialize()) {
+    std::error_code ec;
+    std::filesystem::create_directories(GetInternalGamesFolder(), ec);
     RefreshPaths();
+    if (cvars::web_transfer_enabled) {
+      StartWebTransfer();
+    }
     // to-do, remodel this so it doesn't instantly shutdown.
     //app->InvokeOnDestroy();
   }
@@ -154,6 +171,11 @@ void UWP::StartXenia() {
 
 void UWP::ExecutePendingFunctionsFromUIThread() {
   app_context->ExecutePendingFunctionsFromUIThread();
+
+  // Uploads finish on server threads; rescan the game list on this thread.
+  if (s_refresh_pending.exchange(false)) {
+    RefreshPaths();
+  }
 
   if (s_window) {
     app_context->CallInUIThread([=]() { s_window->RequestPaint(); });
@@ -340,6 +362,7 @@ void UWP::RefreshPaths() {
   s_scanned_paths.clear();
 
   RecurseFolderForGames(UWP::GetLocalCache());
+  RecurseFolderForGames(UWP::GetInternalGamesFolder());
 
   if (!cvars::gamepaths.empty()) {
     std::stringstream ss (cvars::gamepaths);
@@ -378,4 +401,98 @@ void UWP::SetGamePaths(std::vector<std::string> paths) {
 
 std::vector<std::string> UWP::GetPaths() { 
   return s_paths;
+}
+
+
+// Prefer the large Dev Mode partition (D:\DevelopmentFiles, ~180 GB on
+// Series consoles). The app's own LocalState lives on a small (~32 GB)
+// partition. Fall back to LocalState when the dev partition isn't writable
+// (e.g. retail mode).
+std::string UWP::GetInternalGamesFolder() {
+  static const std::string folder = [] {
+    const std::string dev_folder = "D:\\DevelopmentFiles\\XeniaCanary\\Games";
+    std::error_code ec;
+    std::filesystem::create_directories(dev_folder, ec);
+    if (!ec && std::filesystem::is_directory(dev_folder, ec) &&
+        UWP::TestPathPermissions(dev_folder)) {
+      return dev_folder;
+    }
+    return UWP::GetLocalState() + "\\Games";
+  }();
+  return folder;
+}
+
+static void SaveWebTransferEnabled(bool enabled) {
+  auto it = cvar::ConfigVars->find("web_transfer_enabled");
+  if (it == cvar::ConfigVars->end()) return;
+  auto cv = dynamic_cast<cvar::ConfigVar<bool>*>(it->second);
+  if (!cv) return;
+  cv->SetConfigValue(enabled);
+  config::SaveConfig();
+}
+
+bool UWP::StartWebTransfer() {
+  if (s_web_transfer.IsRunning()) return true;
+  s_web_transfer.SetOnFilesChanged([] { s_refresh_pending = true; });
+  std::vector<WebTransferRoot> roots = {
+      {"Games", std::filesystem::path(xe::to_path(GetInternalGamesFolder())),
+       "Games on the console's internal storage. Upload ISO, ZAR, GOD/CON "
+       "files or whole extracted game folders (with default.xex). They appear "
+       "in the game list as soon as the upload finishes."},
+      {"Xenia data", std::filesystem::path(xe::to_path(GetLocalState())),
+       "Xenia's own data: config, patches, content (saves, DLC, title "
+       "updates). Only change files here if you know what they are."},
+  };
+  uint16_t port = uint16_t(std::clamp(cvars::web_transfer_port, 1, 65535));
+  bool ok = s_web_transfer.Start(port, std::move(roots));
+  if (ok) {
+    XELOGI("Web transfer server listening on port {}", port);
+    SaveWebTransferEnabled(true);
+  } else {
+    XELOGE("Web transfer server failed: {}",
+           s_web_transfer.GetStatus().last_error);
+  }
+  return ok;
+}
+
+void UWP::StopWebTransfer() {
+  s_web_transfer.Stop();
+  SaveWebTransferEnabled(false);
+}
+
+bool UWP::IsWebTransferRunning() { return s_web_transfer.IsRunning(); }
+
+std::vector<std::string> UWP::GetWebTransferUrls() {
+  std::vector<std::string> urls;
+  const uint16_t port = s_web_transfer.GetStatus().port;
+  try {
+    using namespace winrt::Windows::Networking;
+    for (const auto& host :
+         Connectivity::NetworkInformation::GetHostNames()) {
+      if (host.Type() != HostNameType::Ipv4) continue;
+      std::string ip = winrt::to_string(host.CanonicalName());
+      if (ip.rfind("127.", 0) == 0 || ip.rfind("169.254.", 0) == 0) continue;
+      urls.push_back("http://" + ip + ":" + std::to_string(port));
+    }
+  } catch (...) {
+  }
+  return urls;
+}
+
+std::string UWP::GetWebTransferStatusText() {
+  auto st = s_web_transfer.GetStatus();
+  if (!st.running) {
+    return st.last_error.empty() ? "Stopped" : "Error: " + st.last_error;
+  }
+  if (st.upload_active) {
+    double pct = st.upload_total
+                     ? 100.0 * double(st.upload_bytes) / double(st.upload_total)
+                     : 0.0;
+    return fmt::format("Receiving {} ({:.1f}% of {:.2f} GB)", st.upload_name,
+                       pct, double(st.upload_total) / (1024.0 * 1024 * 1024));
+  }
+  std::string text = fmt::format("Ready. {} file(s) received this session.",
+                                 st.files_received);
+  if (!st.last_error.empty()) text += " Last error: " + st.last_error;
+  return text;
 }

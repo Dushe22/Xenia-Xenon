@@ -7794,6 +7794,42 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
 
           ImGui::TextWrapped(
               "Remember to configure your USB filesystem so its paths work ");
+          // Internal storage + LAN web transfer.
+          ImGui::Dummy(ImVec2(0.0f, 20.0f * display_scale));
+          ImGui::Separator();
+          ImGui::TextUnformatted("Internal storage & web transfer");
+          ImGui::TextWrapped(
+              "Games copied into the console's internal storage appear in the "
+              "game list automatically. Start the transfer server, then open "
+              "the address below in a browser on a PC or phone connected to "
+              "the same network.");
+          ImGui::TextWrapped("Internal games folder: %s",
+                             UWP::GetInternalGamesFolder().c_str());
+          const bool web_running = UWP::IsWebTransferRunning();
+          if (draw_text_button("##web_transfer_toggle",
+                               web_running ? "Stop Transfer Server"
+                                           : "Start Transfer Server")) {
+            if (web_running) {
+              UWP::StopWebTransfer();
+            } else {
+              UWP::StartWebTransfer();
+            }
+          }
+          ImGui::SameLine();
+          if (draw_text_button("##rescan_games_button", "Rescan Games")) {
+            UWP::RefreshPaths();
+          }
+          if (web_running) {
+            auto urls = UWP::GetWebTransferUrls();
+            if (urls.empty()) {
+              ImGui::TextWrapped("No network connection found.");
+            }
+            for (const auto& url : urls) {
+              ImGui::TextColored(ImVec4(0.42f, 0.75f, 0.29f, 1.0f), "Open: %s",
+                                 url.c_str());
+            }
+          }
+          ImGui::TextWrapped("%s", UWP::GetWebTransferStatusText().c_str());
 
           if (show_path_warning_) {
             ImGui::OpenPopup("Warning");
