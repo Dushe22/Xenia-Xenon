@@ -21,7 +21,7 @@ built on the Xenia Canary UWP port. It is not associated with the Xenia develope
   and every option has a plain-language description.
 - **Own package.** Installs as **Xenia Xenon**, next to Xenia Canary without replacing it.
 - **Internal game storage.** Games live in `D:\DevelopmentFiles\XeniaXenon\Games`, on the large
-  Dev Mode partition (~180 GB on Series X|S), and show up in the library automatically.
+  Dev Mode partition, and show up in the library automatically.
 - **Web file transfer.** A file manager you open from any browser (PC or phone) on the same
   network. Drop ISO / ZAR / GOD files or whole game folders, with progress, rename, delete,
   download and free space. No internet or extra software needed.
