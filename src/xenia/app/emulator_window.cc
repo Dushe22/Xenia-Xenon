@@ -52,22 +52,22 @@
 #include "xenia/kernel/xam/ui/create_profile_ui.h"
 #include "xenia/kernel/xam/xam_module.h"
 //#include "xenia/ui/file_picker.h"
+#include "xenia/app/xenon_settings_page.h"
 #include "xenia/ui/graphics_provider.h"
 #include "xenia/ui/imgui_dialog.h"
 #include "xenia/ui/imgui_drawer.h"
-#include "xenia/app/xenon_settings_page.h"
 #include "xenia/ui/immediate_drawer.h"
 #include "xenia/ui/presenter.h"
 #include "xenia/ui/ui_event.h"
 #include "xenia/ui/virtual_key.h"
 
 #if XE_PLATFORM_WINRT
+#include <cfloat>
+#include <ctime>
 #include "xenia-canary-uwp/UWPUtil.h"
 #include "xenia-canary-uwp/WinRTKeyboard.h"
 #include "xenia-canary-uwp/XeniaUWP.h"
 #include "xenia/ui/imgui_drawer.h"
-#include <cfloat>
-#include <ctime>
 #endif
 
 #include <limits>
@@ -147,7 +147,8 @@ DEFINE_string(ui_guide_image, "blades.png",
               "UI");
 
 DEFINE_string(ui_text_effect, "none",
-              "Text effect to apply globally to all UI text. Options: shadow, lift, stroke_fill, glow, outline, double_shadow, bold, none.",
+              "Text effect to apply globally to all UI text. Options: shadow, "
+              "lift, stroke_fill, glow, outline, double_shadow, bold, none.",
               "UI");
 
 DEFINE_string(ui_text_color, "white",
@@ -155,7 +156,9 @@ DEFINE_string(ui_text_color, "white",
               "UI");
 
 DEFINE_string(ui_border_color, "xenon",
-              "Accent color applied to UI borders, checkboxes, combo accents, and frontend headers. Options: xenon, green, purple, red, orange, blue, yellow, grey, black, white.",
+              "Accent color applied to UI borders, checkboxes, combo accents, "
+              "and frontend headers. Options: xenon, green, purple, red, "
+              "orange, blue, yellow, grey, black, white.",
               "UI");
 
 DEFINE_bool(ui_show_welcome, true,
@@ -255,20 +258,22 @@ namespace xe {
 namespace app {
 
 // Lets the right stick scroll the current window (frontend pages).
-static bool g_xenon_settings_on_right = false;
 static xe::app::xenon_settings::State* g_xenon_active_page_state = nullptr;
-static constexpr char kXenonVersion[] = "1.1.9.0";
+static constexpr char kXenonVersion[] = "1.1.9.1";
 static bool g_xenon_pergame_on_right = false;
 
 static void XenonGamepadScroll() {
   if (ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId)) return;
+  const ImGuiIO& io = ImGui::GetIO();
+  auto analog = [&io](ImGuiKey key) {
+    return io.KeysData[key - ImGuiKey_NamedKey_BEGIN].AnalogValue;
+  };
   const float v =
-      ImGui::GetIO().KeysData[ImGuiKey_GamepadRStickDown - ImGuiKey_NamedKey_BEGIN].AnalogValue -
-      ImGui::GetIO().KeysData[ImGuiKey_GamepadRStickUp - ImGuiKey_NamedKey_BEGIN].AnalogValue;
+      analog(ImGuiKey_GamepadRStickDown) - analog(ImGuiKey_GamepadRStickUp);
   if (v > 0.15f || v < -0.15f) {
-    const float speed = 1600.0f * (ImGui::GetIO().DisplaySize.x / 1920.0f);
+    const float speed = 1600.0f * (io.DisplaySize.x / 1920.0f);
     ImGui::SetScrollY(ImGui::GetScrollY() +
-                      v * speed * std::min(ImGui::GetIO().DeltaTime, 0.1f));
+                      v * speed * std::min(io.DeltaTime, 0.1f));
   }
 }
 
@@ -2159,8 +2164,7 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
       ImGui::Begin("##xenon_welcome", nullptr,
                    ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
                        ImGuiWindowFlags_NoSavedSettings |
-                       ImGuiWindowFlags_NoBackground |
-                       ImGuiWindowFlags_NoNav);
+                       ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoNav);
       ImDrawList* dl = ImGui::GetWindowDrawList();
       ImFont* ui_font = ImGui::GetFont();
       ImFont* display_font = xe::ui::GetXenonDisplayFont();
@@ -2168,16 +2172,15 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
 
       // Background: navy with xenon glows (opaque while not fading out).
       const int bg_a = welcome_out >= 0.0f ? int(255 * alpha) : 255;
-      dl->AddRectFilledMultiColor(
-          ImVec2(0, 0), ds, IM_COL32(10, 12, 26, bg_a),
-          IM_COL32(16, 12, 38, bg_a), IM_COL32(6, 8, 18, bg_a),
-          IM_COL32(6, 10, 22, bg_a));
+      dl->AddRectFilledMultiColor(ImVec2(0, 0), ds, IM_COL32(10, 12, 26, bg_a),
+                                  IM_COL32(16, 12, 38, bg_a),
+                                  IM_COL32(6, 8, 18, bg_a),
+                                  IM_COL32(6, 10, 22, bg_a));
       auto glow = [&](ImVec2 c, float radius, int r, int g, int b, float k) {
         for (int i = 0; i < 28; ++i) {
           const float f = float(i) / 28.0f;
           dl->AddCircleFilled(c, radius * (1.0f - f * 0.92f),
-                              IM_COL32(r, g, b, int(k * 255 / 28 * alpha)),
-                              72);
+                              IM_COL32(r, g, b, int(k * 255 / 28 * alpha)), 72);
         }
       };
       const float pulse = 0.5f + 0.5f * std::sin(welcome_time * 1.4f);
@@ -2265,7 +2268,15 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
                             ImVec2(mx.x + grow, mx.y + grow),
                             A(122, 120, 255, 10), h * 0.5f + grow);
         }
-        dl->AddRectFilledMultiColor(ImVec2(mn.x + h * 0.5f, mn.y), ImVec2(mx.x - h * 0.5f, mx.y), A(132, 96, 255, 255), A(70, 150, 255, 255), A(70, 150, 255, 255), A(132, 96, 255, 255)); dl->AddCircleFilled(ImVec2(mn.x + h * 0.5f, mn.y + h * 0.5f), h * 0.5f, A(132, 96, 255, 255), 48); dl->AddCircleFilled(ImVec2(mx.x - h * 0.5f, mn.y + h * 0.5f), h * 0.5f, A(70, 150, 255, 255), 48); dl->AddRect(mn, mx, A(255, 255, 255, 70), h * 0.5f, 0, 1.5f * s);
+        dl->AddRectFilledMultiColor(ImVec2(mn.x + h * 0.5f, mn.y),
+                                    ImVec2(mx.x - h * 0.5f, mx.y),
+                                    A(132, 96, 255, 255), A(70, 150, 255, 255),
+                                    A(70, 150, 255, 255), A(132, 96, 255, 255));
+        dl->AddCircleFilled(ImVec2(mn.x + h * 0.5f, mn.y + h * 0.5f), h * 0.5f,
+                            A(132, 96, 255, 255), 48);
+        dl->AddCircleFilled(ImVec2(mx.x - h * 0.5f, mn.y + h * 0.5f), h * 0.5f,
+                            A(70, 150, 255, 255), 48);
+        dl->AddRect(mn, mx, A(255, 255, 255, 70), h * 0.5f, 0, 1.5f * s);
         dl->AddText(ui_font, f, ImVec2(left + 40.0f * s, y + (h - f) * 0.5f),
                     A(255, 255, 255, 255), label);
         if (auto a_tex = GetOrCreateButtonTexture('A')) {
@@ -2357,7 +2368,7 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
     // Channel 1: Dynamic game background (middle layer) 
     // Channel 2: Interface overlay (top layer)
     // Channel 3: UI elements
-    
+
     // Base layer: deep navy gradient with soft xenon glows.
     frontend_splitter.SetCurrentChannel(frontend_draw_list, 0);
     {
@@ -2373,19 +2384,16 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
         const int alpha = std::max(1, int(strength * 255.0f / kSteps));
         for (int i = 0; i < kSteps; ++i) {
           const float t = float(i) / float(kSteps);
-          frontend_draw_list->AddCircleFilled(
-              center, radius * (1.0f - t * 0.92f), IM_COL32(r, g, b, alpha), 72);
+          frontend_draw_list->AddCircleFilled(center,
+                                              radius * (1.0f - t * 0.92f),
+                                              IM_COL32(r, g, b, alpha), 72);
         }
       };
       // Each section has its own glow colors; blend smoothly between them.
-      static const float kGlowA[4][3] = {{122, 92, 255},
-                                         {70, 110, 255},
-                                         {40, 180, 205},
-                                         {200, 90, 230}};
-      static const float kGlowB[4][3] = {{56, 170, 255},
-                                         {130, 80, 255},
-                                         {60, 215, 170},
-                                         {90, 120, 255}};
+      static const float kGlowA[4][3] = {
+          {122, 92, 255}, {70, 110, 255}, {40, 180, 205}, {200, 90, 230}};
+      static const float kGlowB[4][3] = {
+          {56, 170, 255}, {130, 80, 255}, {60, 215, 170}, {90, 120, 255}};
       static float glow_a[3] = {122, 92, 255};
       static float glow_b[3] = {56, 170, 255};
       const int glow_page =
@@ -2396,10 +2404,10 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
         glow_a[i] += (kGlowA[glow_page][i] - glow_a[i]) * glow_k;
         glow_b[i] += (kGlowB[glow_page][i] - glow_b[i]) * glow_k;
       }
-      add_glow(ImVec2(ds.x * 0.70f, ds.y * 0.28f), ds.x * 0.42f,
-               int(glow_a[0]), int(glow_a[1]), int(glow_a[2]), 0.30f);
-      add_glow(ImVec2(ds.x * 0.98f, ds.y * 0.90f), ds.x * 0.34f,
-               int(glow_b[0]), int(glow_b[1]), int(glow_b[2]), 0.22f);
+      add_glow(ImVec2(ds.x * 0.70f, ds.y * 0.28f), ds.x * 0.42f, int(glow_a[0]),
+               int(glow_a[1]), int(glow_a[2]), 0.30f);
+      add_glow(ImVec2(ds.x * 0.98f, ds.y * 0.90f), ds.x * 0.34f, int(glow_b[0]),
+               int(glow_b[1]), int(glow_b[2]), 0.22f);
       add_glow(ImVec2(ds.x * 0.05f, ds.y * 1.05f), ds.x * 0.30f,
                int(glow_a[0] * 0.8f), int(glow_a[1]), int(glow_a[2]), 0.14f);
       frontend_draw_list->PopClipRect();
@@ -3446,7 +3454,8 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
           return pos.x;
         };
         auto to_upper = [](std::string t) {
-          for (char& c : t) c = char(std::toupper(static_cast<unsigned char>(c)));
+          for (char& c : t)
+            c = char(std::toupper(static_cast<unsigned char>(c)));
           return t;
         };
         auto draw_cover = [&](const std::string* art, ImVec2 mn, ImVec2 mx,
@@ -3456,7 +3465,8 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
           if (art) tex = GetOrCreateImageTexture(*art);
           if (tex && tex->width > 0 && tex->height > 0) {
             // Cover-fit: crop the texture to the card aspect ratio.
-            const float box_aspect = (mx.x - mn.x) / std::max(1.0f, mx.y - mn.y);
+            const float box_aspect =
+                (mx.x - mn.x) / std::max(1.0f, mx.y - mn.y);
             const float tex_aspect = float(tex->width) / float(tex->height);
             ImVec2 uv0(0.0f, 0.0f), uv1(1.0f, 1.0f);
             if (tex_aspect > box_aspect) {
@@ -3482,7 +3492,8 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
               IM_COL32(122, 92, 255, 70), IM_COL32(56, 170, 255, 40),
               IM_COL32(56, 170, 255, 20), IM_COL32(122, 92, 255, 50));
           const std::string initial =
-              fallback_title.empty() ? "?" : to_upper(fallback_title.substr(0, 1));
+              fallback_title.empty() ? "?"
+                                     : to_upper(fallback_title.substr(0, 1));
           const float isz = (mx.y - mn.y) * 0.42f;
           const float iw = text_width(display_font, isz, initial);
           page_draw_list->AddText(
@@ -3490,7 +3501,8 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
               ImVec2((mn.x + mx.x - iw) * 0.5f, (mn.y + mx.y - isz) * 0.5f),
               IM_COL32(220, 226, 255, 200), initial.c_str());
         };
-        auto get_backdrop_art = [](const GameListRow& row) -> const std::string* {
+        auto get_backdrop_art =
+            [](const GameListRow& row) -> const std::string* {
           if (!row.has_metadata) return nullptr;
           const auto& m = row.metadata;
           if (!m.background_path.empty()) return &m.background_path;
@@ -3518,7 +3530,8 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
           if (bg_tex && bg_tex->width > 0 && bg_tex->height > 0) {
             const ImVec2 ds = io.DisplaySize;
             const float screen_aspect = ds.x / ds.y;
-            const float tex_aspect = float(bg_tex->width) / float(bg_tex->height);
+            const float tex_aspect =
+                float(bg_tex->width) / float(bg_tex->height);
             ImVec2 uv0(0.0f, 0.0f), uv1(1.0f, 1.0f);
             if (tex_aspect > screen_aspect) {
               const float u = screen_aspect / tex_aspect;
@@ -3573,8 +3586,9 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
             page_draw_list->AddText(display_font, 72.0f * s, ImVec2(x, y),
                                     kTextColor, "No games yet");
             y += 92.0f * s;
-            std::string hint = "Copy games from a PC or phone browser: start the "
-                               "transfer server in Storage.";
+            std::string hint =
+                "Copy games from a PC or phone browser: start the "
+                "transfer server in Storage.";
             auto urls = UWP::GetWebTransferUrls();
             if (UWP::IsWebTransferRunning() && !urls.empty()) {
               hint = "Open " + urls.front() +
@@ -3629,10 +3643,9 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
             const float chip_h = 38.0f * s;
             for (const auto& chip : chips) {
               const float w = text_width(ui_font, chip_font, chip) + 32.0f * s;
-              page_draw_list->AddRectFilled(ImVec2(cx, y),
-                                            ImVec2(cx + w, y + chip_h),
-                                            IM_COL32(255, 255, 255, 18),
-                                            chip_h * 0.5f);
+              page_draw_list->AddRectFilled(
+                  ImVec2(cx, y), ImVec2(cx + w, y + chip_h),
+                  IM_COL32(255, 255, 255, 18), chip_h * 0.5f);
               page_draw_list->AddRect(ImVec2(cx, y), ImVec2(cx + w, y + chip_h),
                                       IM_COL32(255, 255, 255, 40),
                                       chip_h * 0.5f, 0, 1.5f * s);
@@ -3645,8 +3658,8 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
             y += chip_h + 30.0f * s;
 
             // Action pills: Play (A) and Options (X).
-            auto draw_action_pill = [&](float px, const char* label, char button,
-                                        bool primary) {
+            auto draw_action_pill = [&](float px, const char* label,
+                                        char button, bool primary) {
               const float h = 66.0f * s;
               const float font = 30.0f * s;
               const float icon = 34.0f * s;
@@ -3654,17 +3667,16 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
                               (42.0f + 16.0f + 24.0f) * s;
               const ImVec2 mn(px, y), mx(px + w, y + h);
               if (primary) {
-                page_draw_list->AddRectFilled(mn, mx, IM_COL32(246, 247, 255, 255),
-                                              h * 0.5f);
+                page_draw_list->AddRectFilled(
+                    mn, mx, IM_COL32(246, 247, 255, 255), h * 0.5f);
               } else {
-                page_draw_list->AddRectFilled(mn, mx, IM_COL32(255, 255, 255, 24),
-                                              h * 0.5f);
+                page_draw_list->AddRectFilled(
+                    mn, mx, IM_COL32(255, 255, 255, 24), h * 0.5f);
                 page_draw_list->AddRect(mn, mx, IM_COL32(255, 255, 255, 46),
                                         h * 0.5f, 0, 1.5f * s);
               }
               page_draw_list->AddText(
-                  ui_font, font,
-                  ImVec2(px + 42.0f * s, y + (h - font) * 0.5f),
+                  ui_font, font, ImVec2(px + 42.0f * s, y + (h - font) * 0.5f),
                   primary ? IM_COL32(12, 14, 30, 255) : kTextColor, label);
               if (auto icon_tex = GetOrCreateButtonTexture(button)) {
                 const float ix = mx.x - 24.0f * s - icon;
@@ -3692,7 +3704,8 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
           float w = 0.0f;
           for (char c : count) {
             char ch[2] = {c, 0};
-            w += ui_font->CalcTextSizeA(18.0f * s, FLT_MAX, 0.0f, ch).x + 4.0f * s;
+            w += ui_font->CalcTextSizeA(18.0f * s, FLT_MAX, 0.0f, ch).x +
+                 4.0f * s;
           }
           draw_spaced(ui_font, 18.0f * s,
                       ImVec2(page_origin.x + page_size.x - w - 16.0f * s,
@@ -3723,7 +3736,8 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
                ordered_index < ordered_game_row_indices.size() &&
                ordered_index < visible_cards;
                ++ordered_index) {
-            const auto& row = game_rows[ordered_game_row_indices[ordered_index]];
+            const auto& row =
+                game_rows[ordered_game_row_indices[ordered_index]];
             ImGui::PushID(row.path.c_str());
             const bool is_selected = selected_game_path_ == row.path;
             if (!is_any_game_context_open && is_selected) {
@@ -5300,7 +5314,9 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
               ImGui::TableSetupColumn("##pergame_right_col",
                                       ImGuiTableColumnFlags_WidthStretch);
               ImGui::TableNextColumn();
-              ImGui::BeginChild("##pergame_left_list", ImVec2(0.0f, ImGui::GetContentRegionAvail().y), ImGuiChildFlags_NavFlattened);
+              ImGui::BeginChild("##pergame_left_list",
+                                ImVec2(0.0f, ImGui::GetContentRegionAvail().y),
+                                ImGuiChildFlags_NavFlattened);
               if (per_game_config_popup_focus_requested_ ||
                   per_game_config_focus_jump_request_ ==
                       PerGameConfigFocusSide::kLeft) {
@@ -5574,7 +5590,9 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
             ImGui::EndChild();
             ImGui::TableNextColumn();
             ImGui::TableNextColumn();
-            ImGui::BeginChild("##pergame_right_scroll", ImVec2(0.0f, ImGui::GetContentRegionAvail().y), ImGuiChildFlags_NavFlattened);
+            ImGui::BeginChild("##pergame_right_scroll",
+                              ImVec2(0.0f, ImGui::GetContentRegionAvail().y),
+                              ImGuiChildFlags_NavFlattened);
             XenonGamepadScroll();
 
             const bool right_column_has_selection =
@@ -6123,7 +6141,7 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
         // Xenon settings screen (data-driven, owns its controller input).
         static xe::app::xenon_settings::State xenon_settings_state;
         g_xenon_active_page_state = &xenon_settings_state;
-        g_xenon_settings_on_right = xe::app::xenon_settings::Draw(
+        xe::app::xenon_settings::Draw(
             xenon_settings_state, xe::app::xenon_settings::Categories(),
             display_scale, xe::ui::GetXenonDisplayFont());
       }
@@ -6201,9 +6219,9 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
                   "to the same network as the console."));
             }
           }
-          transfer.options.push_back(xs::Info(
-              "Status",
-              []() { return std::string(UWP::GetWebTransferStatusText()); }));
+          transfer.options.push_back(xs::Info("Status", []() {
+            return std::string(UWP::GetWebTransferStatusText());
+          }));
           transfer.options.push_back(xs::Info(
               "Internal games folder",
               []() { return std::string(UWP::GetInternalGamesFolder()); },
@@ -6220,8 +6238,8 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
               "Export current config",
               []() {
                 const std::string name = UWP::ExportConfig();
-                config_status = name.empty() ? "Export failed."
-                                             : "Exported " + name;
+                config_status =
+                    name.empty() ? "Export failed." : "Exported " + name;
               },
               "Saves a copy of your current settings as a backup. Backups "
               "also appear in the web transfer page under Config backups, so "
@@ -6256,8 +6274,7 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
               "Config folders location",
               [this]() {
                 auto find_path = [](const char* name) {
-                  return dynamic_cast<
-                      cvar::ConfigVar<std::filesystem::path>*>(
+                  return dynamic_cast<cvar::ConfigVar<std::filesystem::path>*>(
                       cvar::ConfigVars->find(name)->second);
                 };
                 auto ccache_root = find_path("cache_root");
@@ -6287,14 +6304,13 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
               "changing it.",
               []() {
                 auto it = cvar::ConfigVars->find("content_root");
-                auto c = it == cvar::ConfigVars->end()
-                             ? nullptr
-                             : dynamic_cast<
-                                   cvar::ConfigVar<std::filesystem::path>*>(
-                                   it->second);
+                auto c =
+                    it == cvar::ConfigVars->end()
+                        ? nullptr
+                        : dynamic_cast<cvar::ConfigVar<std::filesystem::path>*>(
+                              it->second);
                 if (!c) return std::string();
-                return xe::path_to_utf8(
-                    c->GetTypedConfigValue().parent_path());
+                return xe::path_to_utf8(c->GetTypedConfigValue().parent_path());
               },
               "Choose"));
           storage.push_back(std::move(data));
@@ -6352,9 +6368,10 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
              {link("Xenia-Xenon on GitHub",
                    "https://github.com/Dushe22/Xenia-Xenon",
                    "Source code, releases and issue tracker for this fork."),
-              link("Original UWP port",
-                   "https://github.com/danprice142/xenia-canary-uwp",
-                   "Source of the Xenia Canary UWP port this fork is based on."),
+              link(
+                  "Original UWP port",
+                  "https://github.com/danprice142/xenia-canary-uwp",
+                  "Source of the Xenia Canary UWP port this fork is based on."),
               link("Xbox port donations", "https://ko-fi.com/danp142",
                    "Support the developer of the Xbox UWP port."),
               link("Xenia project donations",
@@ -6384,7 +6401,6 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
         xs::Draw(xenon_about_state, about, display_scale,
                  xe::ui::GetXenonDisplayFont());
       }
-
       }
       ImGui::EndChild();
       ImGui::PopStyleVar(2);
@@ -6403,33 +6419,6 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
     }
 
     frontend_splitter.Merge(frontend_draw_list);
-    
-    const float ux = io.DisplaySize.x / 1024.0f;
-    const float uy = io.DisplaySize.y / 576.0f;
-
-    auto draw_rotated_text = [frontend_draw_list](const char* text,
-                                                  ImVec2 anchor,
-                                                  float font_size,
-                                                  ImU32 color,
-                                                  float rotation_radians) {
-      DrawRotatedTextWithConfiguredEffect(frontend_draw_list, ImGui::GetFont(),
-                                          font_size, anchor, color, text,
-                                          rotation_radians);
-    };
-
-    auto draw_button_icon = [frontend_draw_list, this](char letter,
-                                                        ImVec2 center,
-                                                        float size) {
-      auto tex = GetOrCreateButtonTexture(letter);
-      if (!tex) {
-        return;
-      }
-      const ImVec2 half(size * 0.5f, size * 0.5f);
-      frontend_draw_list->AddImage(
-          reinterpret_cast<ImTextureID>(tex.get()),
-          ImVec2(center.x - half.x, center.y - half.y),
-          ImVec2(center.x + half.x, center.y + half.y));
-    };
 
     // ---- Xenon top bar + footer -----------------------------------------
     frontend_draw_list->PushClipRect(ImVec2(0.0f, 0.0f), io.DisplaySize, false);
@@ -6450,7 +6439,8 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
         for (const char* p = t; *p; ++p) {
           ch[0] = *p;
           frontend_draw_list->AddText(f, size, pos, col, ch, ch + 1);
-          pos.x += f->CalcTextSizeA(size, FLT_MAX, 0.0f, ch, ch + 1).x + spacing;
+          pos.x +=
+              f->CalcTextSizeA(size, FLT_MAX, 0.0f, ch, ch + 1).x + spacing;
         }
         return pos.x;
       };
@@ -6469,9 +6459,9 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
                                   IM_COL32(255, 255, 255, 26), 1.5f * s);
       if (auto logo = GetOrCreateImageTexture("Assets/xenon-logo.png")) {
         const float ls = 68.0f * s;
-        frontend_draw_list->AddImage(
-            reinterpret_cast<ImTextureID>(logo.get()),
-            ImVec2(30.0f * s, 46.0f * s), ImVec2(30.0f * s + ls, 46.0f * s + ls));
+        frontend_draw_list->AddImage(reinterpret_cast<ImTextureID>(logo.get()),
+                                     ImVec2(30.0f * s, 46.0f * s),
+                                     ImVec2(30.0f * s + ls, 46.0f * s + ls));
       }
       draw_spaced(brand_font, mark_size, ImVec2(110.0f * s, 52.0f * s), kText,
                   "XENON", 9.0f * s);
@@ -6522,9 +6512,10 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
         const ImVec2 mx(side_x + side_w, pill_y + item_h);
         for (int g = 0; g < 8; ++g) {
           const float grow = (8 - g) * 2.0f * s;
-          frontend_draw_list->AddRectFilled(
-              ImVec2(mn.x - grow, mn.y - grow), ImVec2(mx.x + grow, mx.y + grow),
-              IM_COL32(122, 110, 255, 8), item_h * 0.5f + grow);
+          frontend_draw_list->AddRectFilled(ImVec2(mn.x - grow, mn.y - grow),
+                                            ImVec2(mx.x + grow, mx.y + grow),
+                                            IM_COL32(122, 110, 255, 8),
+                                            item_h * 0.5f + grow);
         }
         frontend_draw_list->AddRectFilled(mn, mx, IM_COL32(112, 108, 255, 225),
                                           item_h * 0.5f);
@@ -6621,9 +6612,9 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
               ImVec2(fx + icon, foot_cy + icon * 0.5f));
         }
         const float f = 24.0f * s;
-        frontend_draw_list->AddText(ui_font, f,
-                                    ImVec2(fx + icon + 12.0f * s, foot_cy - f * 0.5f),
-                                    IM_COL32(220, 226, 250, 255), label);
+        frontend_draw_list->AddText(
+            ui_font, f, ImVec2(fx + icon + 12.0f * s, foot_cy - f * 0.5f),
+            IM_COL32(220, 226, 250, 255), label);
         fx += icon + 12.0f * s + tw(ui_font, f, label) + 40.0f * s;
       };
       if (active_frontend_page_ == FrontendPage::kGameList) {
@@ -6649,7 +6640,8 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
       const float vf = 20.0f * s;
       frontend_draw_list->AddText(
           ui_font, vf,
-          ImVec2(ds.x - 96.0f * s - tw(ui_font, vf, version), foot_cy - vf * 0.5f),
+          ImVec2(ds.x - 96.0f * s - tw(ui_font, vf, version),
+                 foot_cy - vf * 0.5f),
           IM_COL32(160, 168, 205, 170), version);
     }
 

@@ -13,7 +13,6 @@
 #include "third_party/stb/stb_image.h"
 #include "xenia/base/cvar.h"
 #include "xenia/ui/imgui_drawer.h"
-#include "xenia/ui/imgui_drawer.h"
 
 namespace xe {
 namespace app {
@@ -609,14 +608,14 @@ inline FooterAnchor& GetFooterAnchor() {
 
 inline OverlayHeaderLayout DrawOverlayHeader(
     ImDrawList* draw_list, const ImVec2& overlay_min, const ImVec2& panel_size,
-    const ImVec2& panel_padding, float ux, float uy, const char* title,
+    const ImVec2& panel_padding, float /*ux*/, float /*uy*/, const char* title,
     bool draw_clock = true) {
   // Sizes match the Xenon menus: 40px display-font titles, 24px body
   // text, 30px clock (at 1080p).
   const float s = ImGui::GetIO().DisplaySize.x / 1920.0f;
-  OverlayHeaderLayout layout = {40.0f * s,
-                                ImVec2(overlay_min.x + panel_padding.x,
-                                       overlay_min.y + 44.0f * s)};
+  OverlayHeaderLayout layout = {
+      40.0f * s,
+      ImVec2(overlay_min.x + panel_padding.x, overlay_min.y + 44.0f * s)};
   ImFont* header_font = ImGui::GetFont();
   ImFont* title_font = xe::ui::GetXenonDisplayFont();
   if (!title_font) title_font = header_font;
@@ -629,7 +628,7 @@ inline OverlayHeaderLayout DrawOverlayHeader(
   const float rule_x1 = overlay_min.x + panel_size.x - panel_padding.x;
   GetFooterAnchor() = {rule_x1, ImGui::GetFrameCount()};
   draw_list->AddRectFilledMultiColor(
-      ImVec2(rule_x0, rule_y), ImVec2(rule_x1, rule_y + 2.0f * uy),
+      ImVec2(rule_x0, rule_y), ImVec2(rule_x1, rule_y + 2.0f * s),
       IM_COL32(150, 92, 255, 200), IM_COL32(56, 170, 255, 40),
       IM_COL32(56, 170, 255, 40), IM_COL32(150, 92, 255, 200));
 
@@ -643,14 +642,15 @@ inline OverlayHeaderLayout DrawOverlayHeader(
   }
 
   const float clock_font = 30.0f * s;
-  const ImVec2 clock_size = header_font->CalcTextSizeA(
-      clock_font, std::numeric_limits<float>::max(), 0.0f,
-      clock_text.c_str(), nullptr, nullptr);
+  const ImVec2 clock_size =
+      header_font->CalcTextSizeA(clock_font, std::numeric_limits<float>::max(),
+                                 0.0f, clock_text.c_str(), nullptr, nullptr);
   const float clock_x =
       overlay_min.x + panel_size.x - panel_padding.x - clock_size.x;
   draw_list->AddText(
       header_font, clock_font,
-      ImVec2(clock_x, layout.position.y + (layout.font_size - clock_font) * 0.5f),
+      ImVec2(clock_x,
+             layout.position.y + (layout.font_size - clock_font) * 0.5f),
       header_color, clock_text.c_str());
   return layout;
 }
@@ -668,9 +668,8 @@ inline void DrawFooterPrompt(ImDrawList* draw_list,
     const float new_text = 21.0f * s;
     const float new_icon = 30.0f * s;
     const float mid_y = text_y + text_size * 0.5f;
-    const float text_w = ImGui::GetFont()
-                             ->CalcTextSizeA(new_text, FLT_MAX, 0.0f, text)
-                             .x;
+    const float text_w =
+        ImGui::GetFont()->CalcTextSizeA(new_text, FLT_MAX, 0.0f, text).x;
     const float icon_x0 = anchor.right_x - (tex ? new_icon : 0.0f);
     const float tx = icon_x0 - (tex ? 12.0f * s : 0.0f) - text_w;
     DrawTextWithConfiguredEffect(draw_list, ImGui::GetFont(), new_text,

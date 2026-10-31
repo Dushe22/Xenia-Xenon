@@ -153,8 +153,8 @@ void ApplyConfiguredUIAccentStyle(ImGuiStyle& style) {
   // Xenon buttons: dark glass at rest, accent only when focused/pressed,
   // so labels stay readable.
   style.Colors[ImGuiCol_Button] = ImVec4(1.0f, 1.0f, 1.0f, 0.07f);
-  style.Colors[ImGuiCol_ButtonHovered] = ImVec4(
-      highlight_color.x, highlight_color.y, highlight_color.z, 0.80f);
+  style.Colors[ImGuiCol_ButtonHovered] =
+      ImVec4(highlight_color.x, highlight_color.y, highlight_color.z, 0.80f);
   style.Colors[ImGuiCol_ButtonActive] = highlight_color;
   style.Colors[ImGuiCol_Header] =
       ImVec4(highlight_color.x, highlight_color.y, highlight_color.z, 0.80f);
