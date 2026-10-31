@@ -25,7 +25,21 @@ std::vector<std::string> GetPaths();
 void SetGamePaths(std::vector<std::string> paths);
 
 // Internal storage + LAN web transfer.
+// Root of Xenon's own data on the Dev Mode partition (falls back to
+// LocalState when it is not writable).
+std::string GetXenonDataFolder();
 std::string GetInternalGamesFolder();
+
+// Config backups (export / import of xenia-canary.config.toml).
+std::string GetConfigBackupFolder();
+// Copies the current config into the backup folder. Returns the file name,
+// or an empty string on failure.
+std::string ExportConfig();
+// Backup file names, newest first.
+std::vector<std::string> ListConfigBackups();
+// Replaces the current config with a backup and reloads it.
+bool ImportConfig(const std::string& backup_name);
+bool DeleteConfigBackup(const std::string& backup_name);
 bool StartWebTransfer();
 void StopWebTransfer();
 bool IsWebTransferRunning();

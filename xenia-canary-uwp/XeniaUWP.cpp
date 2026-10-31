@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <ctime>
 #include <fstream>
 
 #include "WebTransferServer.h"
@@ -408,18 +409,105 @@ std::vector<std::string> UWP::GetPaths() {
 // Series consoles). The app's own LocalState lives on a small (~32 GB)
 // partition. Fall back to LocalState when the dev partition isn't writable
 // (e.g. retail mode).
-std::string UWP::GetInternalGamesFolder() {
+std::string UWP::GetXenonDataFolder() {
   static const std::string folder = [] {
-    const std::string dev_folder = "D:\\DevelopmentFiles\\XeniaCanary\\Games";
+    const std::string dev_folder = "D:\\DevelopmentFiles\\XeniaXenon";
     std::error_code ec;
     std::filesystem::create_directories(dev_folder, ec);
     if (!ec && std::filesystem::is_directory(dev_folder, ec) &&
         UWP::TestPathPermissions(dev_folder)) {
       return dev_folder;
     }
-    return UWP::GetLocalState() + "\\Games";
+    return UWP::GetLocalState();
   }();
   return folder;
+}
+
+std::string UWP::GetInternalGamesFolder() {
+  static const std::string folder = [] {
+    const std::string games = UWP::GetXenonDataFolder() + "\\Games";
+    std::error_code ec;
+    std::filesystem::create_directories(games, ec);
+    return games;
+  }();
+  return folder;
+}
+
+std::string UWP::GetConfigBackupFolder() {
+  const std::string backups = UWP::GetXenonDataFolder() + "\\Config backups";
+  std::error_code ec;
+  std::filesystem::create_directories(backups, ec);
+  return backups;
+}
+
+static std::filesystem::path CurrentConfigPath() {
+  return std::filesystem::path(xe::to_path(UWP::GetLocalState())) /
+         "xenia-canary.config.toml";
+}
+
+static bool IsSafeBackupName(const std::string& name) {
+  return !name.empty() && name.find_first_of("\\/:") == std::string::npos &&
+         name != "." && name != "..";
+}
+
+std::string UWP::ExportConfig() {
+  config::SaveConfig();
+  std::time_t now = std::time(nullptr);
+  std::tm local_tm{};
+  localtime_s(&local_tm, &now);
+  char name[64];
+  std::strftime(name, sizeof(name), "xenon-config_%Y-%m-%d_%H-%M-%S.toml",
+                &local_tm);
+  const auto target =
+      std::filesystem::path(xe::to_path(GetConfigBackupFolder())) / name;
+  std::error_code ec;
+  std::filesystem::copy_file(CurrentConfigPath(), target,
+                             std::filesystem::copy_options::overwrite_existing,
+                             ec);
+  return ec ? std::string() : std::string(name);
+}
+
+std::vector<std::string> UWP::ListConfigBackups() {
+  std::vector<std::pair<std::filesystem::file_time_type, std::string>> found;
+  std::error_code ec;
+  for (const auto& entry : std::filesystem::directory_iterator(
+           xe::to_path(GetConfigBackupFolder()), ec)) {
+    if (!entry.is_regular_file(ec)) continue;
+    const auto ext = entry.path().extension().string();
+    if (ext != ".toml") continue;
+    found.emplace_back(entry.last_write_time(ec),
+                       xe::path_to_utf8(entry.path().filename()));
+  }
+  std::sort(found.begin(), found.end(),
+            [](const auto& a, const auto& b) { return a.first > b.first; });
+  std::vector<std::string> names;
+  for (auto& f : found) names.push_back(std::move(f.second));
+  return names;
+}
+
+bool UWP::ImportConfig(const std::string& backup_name) {
+  if (!IsSafeBackupName(backup_name)) return false;
+  const auto source =
+      std::filesystem::path(xe::to_path(GetConfigBackupFolder())) /
+      xe::to_path(backup_name);
+  std::error_code ec;
+  if (!std::filesystem::is_regular_file(source, ec)) return false;
+  std::filesystem::copy_file(source, CurrentConfigPath(),
+                             std::filesystem::copy_options::overwrite_existing,
+                             ec);
+  if (ec) return false;
+  // Re-read the config so most settings apply right away.
+  config::SetupConfig(xe::to_path(UWP::GetLocalState()));
+  return true;
+}
+
+bool UWP::DeleteConfigBackup(const std::string& backup_name) {
+  if (!IsSafeBackupName(backup_name)) return false;
+  std::error_code ec;
+  return std::filesystem::remove(
+      std::filesystem::path(xe::to_path(GetConfigBackupFolder())) /
+          xe::to_path(backup_name),
+      ec);
 }
 
 static void SaveWebTransferEnabled(bool enabled) {
@@ -439,6 +527,10 @@ bool UWP::StartWebTransfer() {
        "Games on the console's internal storage. Upload ISO, ZAR, GOD/CON "
        "files or whole extracted game folders (with default.xex). They appear "
        "in the game list as soon as the upload finishes."},
+      {"Config backups",
+       std::filesystem::path(xe::to_path(GetConfigBackupFolder())),
+       "Xenon config backups. Export from Storage > Data on the console, "
+       "or upload a .toml here and import it from the console."},
       {"Xenia data", std::filesystem::path(xe::to_path(GetLocalState())),
        "Xenia's own data: config, patches, content (saves, DLC, title "
        "updates). Only change files here if you know what they are."},

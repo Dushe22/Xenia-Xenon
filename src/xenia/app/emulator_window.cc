@@ -257,7 +257,7 @@ namespace app {
 // Lets the right stick scroll the current window (frontend pages).
 static bool g_xenon_settings_on_right = false;
 static xe::app::xenon_settings::State* g_xenon_active_page_state = nullptr;
-static constexpr char kXenonVersion[] = "1.1.8.4";
+static constexpr char kXenonVersion[] = "1.1.8.5";
 static bool g_xenon_pergame_on_right = false;
 
 static void XenonGamepadScroll() {
@@ -2190,7 +2190,7 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
       float y = ds.y * 0.20f + rise;
 
       // Logo + eyebrow.
-      if (auto logo = GetOrCreateImageTexture("Assets/xenon-logo-white.png")) {
+      if (auto logo = GetOrCreateImageTexture("Assets/xenon-logo.png")) {
         const float ls = 120.0f * s;
         dl->AddImage(reinterpret_cast<ImTextureID>(logo.get()), ImVec2(left, y),
                      ImVec2(left + ls, y + ls), ImVec2(0, 0), ImVec2(1, 1),
@@ -2265,9 +2265,9 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
                             ImVec2(mx.x + grow, mx.y + grow),
                             A(122, 120, 255, 10), h * 0.5f + grow);
         }
-        dl->AddRectFilled(mn, mx, A(246, 247, 255, 255), h * 0.5f);
+        dl->AddRectFilledMultiColor(ImVec2(mn.x + h * 0.5f, mn.y), ImVec2(mx.x - h * 0.5f, mx.y), A(132, 96, 255, 255), A(70, 150, 255, 255), A(70, 150, 255, 255), A(132, 96, 255, 255)); dl->AddCircleFilled(ImVec2(mn.x + h * 0.5f, mn.y + h * 0.5f), h * 0.5f, A(132, 96, 255, 255), 48); dl->AddCircleFilled(ImVec2(mx.x - h * 0.5f, mn.y + h * 0.5f), h * 0.5f, A(70, 150, 255, 255), 48); dl->AddRect(mn, mx, A(255, 255, 255, 70), h * 0.5f, 0, 1.5f * s);
         dl->AddText(ui_font, f, ImVec2(left + 40.0f * s, y + (h - f) * 0.5f),
-                    A(12, 14, 30, 255), label);
+                    A(255, 255, 255, 255), label);
         if (auto a_tex = GetOrCreateButtonTexture('A')) {
           const float ix = mx.x - 26.0f * s - icon;
           dl->AddImage(reinterpret_cast<ImTextureID>(a_tex.get()),
@@ -6212,6 +6212,45 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
           storage.push_back(std::move(transfer));
         }
         {
+          // Config export / import (backups live on the dev partition and
+          // are shared through the web transfer page).
+          static std::string config_status = "Nothing exported yet.";
+          xs::Category cfg{"Config backups", {}};
+          cfg.options.push_back(xs::Action(
+              "Export current config",
+              []() {
+                const std::string name = UWP::ExportConfig();
+                config_status = name.empty() ? "Export failed."
+                                             : "Exported " + name;
+              },
+              "Saves a copy of your current settings as a backup. Backups "
+              "also appear in the web transfer page under Config backups, so "
+              "you can keep them on a PC.",
+              []() { return config_status; }, "Export"));
+          for (const auto& backup : UWP::ListConfigBackups()) {
+            xs::Option row = xs::Action(
+                backup,
+                [backup]() {
+                  config_status = UWP::ImportConfig(backup)
+                                      ? "Imported " + backup +
+                                            ". Restart Xenon to apply all of "
+                                            "it."
+                                      : "Import failed.";
+                },
+                "Press A to replace your current settings with this backup. "
+                "Press Y to delete the backup.",
+                nullptr, "Import");
+            row.secondary = [backup]() {
+              config_status = UWP::DeleteConfigBackup(backup)
+                                  ? "Deleted " + backup
+                                  : "Delete failed.";
+            };
+            row.secondary_label = "Delete";
+            cfg.options.push_back(std::move(row));
+          }
+          storage.push_back(std::move(cfg));
+        }
+        {
           xs::Category data{"Data folders", {}};
           data.options.push_back(xs::Action(
               "Config folders location",
@@ -6428,7 +6467,7 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
       frontend_draw_list->AddLine(ImVec2(sidebar_panel_w, 0.0f),
                                   ImVec2(sidebar_panel_w, ds.y),
                                   IM_COL32(255, 255, 255, 26), 1.5f * s);
-      if (auto logo = GetOrCreateImageTexture("Assets/xenon-logo-white.png")) {
+      if (auto logo = GetOrCreateImageTexture("Assets/xenon-logo.png")) {
         const float ls = 68.0f * s;
         frontend_draw_list->AddImage(
             reinterpret_cast<ImTextureID>(logo.get()),
