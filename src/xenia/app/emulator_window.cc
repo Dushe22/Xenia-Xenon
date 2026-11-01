@@ -264,7 +264,7 @@ namespace app {
 
 // Lets the right stick scroll the current window (frontend pages).
 static xe::app::xenon_settings::State* g_xenon_active_page_state = nullptr;
-static constexpr char kXenonVersion[] = "1.2.2.2";
+static constexpr char kXenonVersion[] = "1.2.2.3";
 static bool g_xenon_pergame_on_right = false;
 
 static void XenonGamepadScroll() {
@@ -4829,42 +4829,17 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
 
             const float footer_text_size = 13.5f * uy;
             const float footer_icon_size = 15.6f * uy;
-            const float footer_icon_gap = 22.0f * ux;
             const float footer_spacing_y = 17.0f * uy;
             const float footer_select_y = overlay_max.y - (32.0f * uy);
             const float footer_back_y = footer_select_y - footer_spacing_y;
-            const float footer_base_x = overlay_min.x + panel_size.x * 0.9f;
-            const float footer_back_text_x = footer_base_x - (70.0f * ux);
-            const float footer_back_icon_offset = 35.0f * ux;
-            const float footer_select_text_x = footer_base_x - (60.0f * ux);
-            const float footer_select_icon_offset = 42.0f * ux;
-            auto draw_footer_prompt = [&](char button, const char* text,
-                                          float text_y, float text_x,
-                                          float icon_offset) {
-              text = Tr(text);
-              DrawTextWithConfiguredEffect(
-                  overlay_draw_list, ImGui::GetFont(), footer_text_size,
-                  ImVec2(text_x, text_y), IM_COL32(205, 205, 205, 255), text);
-              auto tex = GetOrCreateButtonTexture(button);
-              if (!tex) {
-                return;
-              }
-              const ImVec2 icon_center(
-                  text_x + icon_offset,
-                  text_y + footer_text_size * 0.5f);
-              const ImVec2 icon_half(footer_icon_size * 0.5f,
-                                     footer_icon_size * 0.5f);
-              overlay_draw_list->AddImage(
-                  reinterpret_cast<ImTextureID>(tex.get()),
-                  ImVec2(icon_center.x - icon_half.x,
-                         icon_center.y - icon_half.y),
-                  ImVec2(icon_center.x + icon_half.x,
-                         icon_center.y + icon_half.y));
-            };
-            draw_footer_prompt('B', "Back", footer_back_y, footer_back_text_x,
-                               footer_back_icon_offset);
-            draw_footer_prompt('A', "Select", footer_select_y,
-                               footer_select_text_x, footer_select_icon_offset);
+            xe::app::DrawFooterPrompt(
+                overlay_draw_list, GetOrCreateButtonTexture('B'),
+                footer_text_size, footer_icon_size, "Back", footer_back_y,
+                overlay_min.x, 0.0f);
+            xe::app::DrawFooterPrompt(
+                overlay_draw_list, GetOrCreateButtonTexture('A'),
+                footer_text_size, footer_icon_size, "Select", footer_select_y,
+                overlay_min.x, 0.0f);
           }
           ImGui::End();
           ImGui::PopStyleColor();
