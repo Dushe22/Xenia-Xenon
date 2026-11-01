@@ -399,14 +399,15 @@ inline void DrawConfiguredParagraph(const std::string& text) {
 }
 
 inline void DrawConfiguredComboText(const ImVec2& min, const ImVec2& max,
-                                    const char* text) {
+                                    const char* text,
+                                    ImDrawList* draw_list = nullptr) {
   const ImGuiStyle& style = ImGui::GetStyle();
   const float line_height = ImGui::GetTextLineHeight();
   const ImVec2 text_pos(min.x + style.FramePadding.x,
                         min.y + (max.y - min.y - line_height) * 0.5f);
-  DrawTextWithConfiguredEffect(ImGui::GetWindowDrawList(), ImGui::GetFont(),
-                               ImGui::GetFontSize(), text_pos,
-                               ImGui::GetColorU32(ImGuiCol_Text), text);
+  DrawTextWithConfiguredEffect(
+      draw_list ? draw_list : ImGui::GetWindowDrawList(), ImGui::GetFont(),
+      ImGui::GetFontSize(), text_pos, ImGui::GetColorU32(ImGuiCol_Text), text);
 }
 
 inline void DrawConfiguredComboHighlight(const ImVec2& min, const ImVec2& max,

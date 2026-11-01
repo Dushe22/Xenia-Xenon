@@ -1217,21 +1217,26 @@ bool xeDrawProfileContent(xe::ui::ImGuiDrawer* imgui_drawer,
                           bool request_focus) {
   const ImVec2 start_position = ImGui::GetCursorPos();
 
+  // Without a selection target or context menu (e.g. the sign-in dialog)
+  // the profile is display-only: no selectable row or highlight.
+  const bool interactive = selected_xuid || context_menu;
+
   // Make the entire profile area directly selectable
   const bool is_selected = (selected_xuid && *selected_xuid == xuid);
-  if (ImGui::Selectable("##profile_item", is_selected, ImGuiSelectableFlags_SpanAllColumns)) {
+  if (interactive && ImGui::Selectable("##profile_item", is_selected,
+                                       ImGuiSelectableFlags_SpanAllColumns)) {
     if (selected_xuid) {
       *selected_xuid = xuid;
     }
     ImGui::OpenPopup("Profile Menu");
   }
   
-  if (request_focus) {
+  if (interactive && request_focus) {
     ImGui::SetItemDefaultFocus();
   }
 
   // Draw highlight if selected or focused
-  if (is_selected || ImGui::IsItemFocused()) {
+  if (interactive && (is_selected || ImGui::IsItemFocused())) {
     const ImVec2 padding(3.0f, 3.0f);
     xe::app::DrawConfiguredComboHighlight(
         ImVec2(ImGui::GetItemRectMin().x - padding.x,
@@ -1262,13 +1267,17 @@ bool xeDrawProfileContent(xe::ui::ImGuiDrawer* imgui_drawer,
     ImGui::BeginGroup();
     {
       ImGui::TextUnformatted(
-          fmt::format("User: {}\n", account->GetGamertagString()).c_str());
+          fmt::format(fmt::runtime(xe::ui::i18n::Tr("User: {}")),
+                      account->GetGamertagString())
+              .c_str());
       ImGui::TextUnformatted(fmt::format("XUID: {:016X}  \n", xuid).c_str());
       if (user_index != XUserIndexAny) {
         ImGui::TextUnformatted(
-            fmt::format("Assigned to slot: {}\n", user_index + 1).c_str());
+            fmt::format(fmt::runtime(xe::ui::i18n::Tr("Assigned to slot: {}")),
+                        user_index + 1)
+                .c_str());
       } else {
-        ImGui::TextUnformatted(fmt::format("Profile is not signed in").c_str());
+        ImGui::TextUnformatted(xe::ui::i18n::Tr("Profile is not signed in"));
       }
     }
     ImGui::EndGroup();

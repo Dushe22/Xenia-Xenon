@@ -116,12 +116,15 @@ void SigninUI::OnDraw(ImGuiIO& io) {
     current_index = std::clamp(current_index, 0, (int)items.size() - 1);
     xe::app::ScopedAccentComboStyle combo_style;
     const char* preview = items[current_index];
+    ImDrawList* frame_draw_list = ImGui::GetWindowDrawList();
+    const ImVec2 preview_min = ImGui::GetCursorScreenPos();
+    const ImVec2 preview_max(preview_min.x + ImGui::CalcItemWidth(),
+                             preview_min.y + ImGui::GetFrameHeight());
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
     bool open = ImGui::BeginCombo(id, preview);
-    ImVec2 preview_min = ImGui::GetItemRectMin();
-    ImVec2 preview_max = ImGui::GetItemRectMax();
     ImGui::PopStyleColor();
-    xe::app::DrawConfiguredComboText(preview_min, preview_max, preview);
+    xe::app::DrawConfiguredComboText(preview_min, preview_max, preview,
+                                     frame_draw_list);
     bool changed = false;
     if (open) {
       for (int idx = 0; idx < static_cast<int>(items.size()); ++idx) {

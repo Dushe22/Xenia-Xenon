@@ -264,7 +264,7 @@ namespace app {
 
 // Lets the right stick scroll the current window (frontend pages).
 static xe::app::xenon_settings::State* g_xenon_active_page_state = nullptr;
-static constexpr char kXenonVersion[] = "1.2.2.3";
+static constexpr char kXenonVersion[] = "1.2.2.5";
 static bool g_xenon_pergame_on_right = false;
 
 static void XenonGamepadScroll() {
