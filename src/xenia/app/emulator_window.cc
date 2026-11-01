@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <thread>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -263,7 +264,7 @@ namespace app {
 
 // Lets the right stick scroll the current window (frontend pages).
 static xe::app::xenon_settings::State* g_xenon_active_page_state = nullptr;
-static constexpr char kXenonVersion[] = "1.2.1.2";
+static constexpr char kXenonVersion[] = "1.2.2.2";
 static bool g_xenon_pergame_on_right = false;
 
 static void XenonGamepadScroll() {
@@ -363,6 +364,8 @@ EmulatorWindow::EmulatorWindow(Emulator* emulator,
   LoadRecentlyLaunchedTitles();
 
 #if XE_PLATFORM_WINRT
+  std::thread([this]() { QuickMenuWatcher(); }).detach();
+
   if (cvars::skip_frontend) {
     UWP::SelectGameFromWinRT(emulator_);
   } else {
@@ -2365,6 +2368,363 @@ void EmulatorWindow::WinRTFrontendDialog::DrawNoProfilePrompt(ImGuiIO& io) {
 
   no_profile_prompt_dismissed_ = true;
   new NoProfileDialog(imgui_drawer(), &emulator_window_);
+}
+
+// ---- In-game quick menu ---------------------------------------------------
+// A host thread watches for View + Menu while a title runs. Pausing happens on
+// that thread so the UI thread never waits on the GPU or guest threads.
+void EmulatorWindow::QuickMenuWatcher() {
+  constexpr uint16_t kCombo = X_INPUT_GAMEPAD_BACK | X_INPUT_GAMEPAD_START;
+  bool combo_was_down = false;
+  bool title_was_open = false;
+  while (true) {
+    xe::threading::Sleep(std::chrono::milliseconds(40));
+    const bool title_open = emulator_->is_title_open();
+    if (title_open && !title_was_open) {
+      title_start_time_ = std::chrono::steady_clock::now();
+    }
+    title_was_open = title_open;
+
+    auto* input = emulator_->input_system();
+    X_INPUT_STATE state = {};
+    if (!input || !title_open ||
+        input->GetHostState(0, &state) != X_ERROR_SUCCESS) {
+      combo_was_down = false;
+      continue;
+    }
+    const uint16_t buttons = state.gamepad.buttons;
+    const bool combo_down = (buttons & kCombo) == kCombo;
+    if (combo_down && !combo_was_down) {
+      ToggleQuickMenu();
+    }
+    combo_was_down = combo_down;
+
+    // After the menu closes, keep the game's input idle until every button is
+    // let go, so the press that closed the menu doesn't reach the game.
+    if (quick_menu_unblock_pending_ && buttons == 0 &&
+        state.gamepad.left_trigger < 30 && state.gamepad.right_trigger < 30) {
+      quick_menu_unblock_pending_ = false;
+      input->set_guest_input_blocked(false);
+    }
+  }
+}
+
+// Called on the watcher thread.
+void EmulatorWindow::ToggleQuickMenu() {
+  if (quick_menu_open_) {
+    app_context().CallInUIThread([this]() {
+      if (quick_menu_) {
+        quick_menu_->RequestClose();
+      }
+    });
+    return;
+  }
+  if (!emulator_->is_title_open()) {
+    return;
+  }
+  quick_menu_open_ = true;
+  if (auto* input = emulator_->input_system()) {
+    quick_menu_unblock_pending_ = false;
+    input->set_guest_input_blocked(true);
+  }
+  XELOGI("Quick menu: pausing emulation");
+  emulator_->Pause();
+  XELOGI("Quick menu: emulation paused");
+  app_context().CallInUIThread([this]() {
+    quick_menu_ = new QuickMenuDialog(imgui_drawer_.get(), *this);
+  });
+}
+
+void EmulatorWindow::QuickMenuDialog::OnClose() {
+  emulator_window_.quick_menu_ = nullptr;
+  emulator_window_.emulator()->Resume();
+  emulator_window_.quick_menu_unblock_pending_ = true;
+  emulator_window_.quick_menu_open_ = false;
+}
+
+void EmulatorWindow::QuickMenuDialog::OnDraw(ImGuiIO& io) {
+  using ui::i18n::Tr;
+  const ImVec2 ds = io.DisplaySize;
+  const float s = ds.x / 1920.0f;
+  const float dt = std::min(io.DeltaTime, 0.1f);
+  anim_ += ((closing_ ? 0.0f : 1.0f) - anim_) * std::min(1.0f, dt * 14.0f);
+  if (closing_ && anim_ < 0.02f) {
+    Close();
+    return;
+  }
+  const float a = anim_;
+  auto C = [a](int r, int g, int b, int alpha) {
+    return IM_COL32(r, g, b, int(alpha * a));
+  };
+  ImFont* ui_font = ImGui::GetFont();
+  ImFont* display_font = ui::GetXenonDisplayFont();
+  if (!display_font) {
+    display_font = ui_font;
+  }
+  Emulator* emulator = emulator_window_.emulator();
+  hid::InputSystem* input = emulator->input_system();
+
+  enum Row { kResume, kCpuSpeed, kVibration, kClearCache, kExit, kRowCount };
+  constexpr double kSpeeds[] = {0.5, 1.0, 2.0};
+  constexpr const char* kSpeedNames[] = {"0.5x", "1x", "2x"};
+  int speed_index = 1;
+  {
+    const double current = Clock::guest_time_scalar();
+    double best = 1e9;
+    for (int i = 0; i < 3; ++i) {
+      if (std::abs(kSpeeds[i] - current) < best) {
+        best = std::abs(kSpeeds[i] - current);
+        speed_index = i;
+      }
+    }
+  }
+  const bool vibration_on = input && input->GetVibrationCvar();
+
+  // ---- Input -------------------------------------------------------------
+  auto pressed = [](ImGuiKey key, bool repeat = false) {
+    return ImGui::IsKeyPressed(key, repeat);
+  };
+  if (!inputs_armed_) {
+    // Wait until the buttons held while opening the menu are released.
+    inputs_armed_ = !ImGui::IsKeyDown(ImGuiKey_GamepadFaceDown) &&
+                    !ImGui::IsKeyDown(ImGuiKey_GamepadFaceRight) &&
+                    !ImGui::IsKeyDown(ImGuiKey_GamepadStart) &&
+                    !ImGui::IsKeyDown(ImGuiKey_GamepadBack);
+  }
+  // Directions use their own repeat: one step on press, then a delay and a
+  // steady rate while held. ImGui's repeat runs far too fast here.
+  auto held_dir = []() {
+    auto down = [](ImGuiKey a, ImGuiKey b) {
+      return ImGui::IsKeyDown(a) || ImGui::IsKeyDown(b);
+    };
+    if (down(ImGuiKey_GamepadDpadUp, ImGuiKey_UpArrow)) return 1;
+    if (down(ImGuiKey_GamepadDpadDown, ImGuiKey_DownArrow)) return 2;
+    if (down(ImGuiKey_GamepadDpadLeft, ImGuiKey_LeftArrow)) return 3;
+    if (down(ImGuiKey_GamepadDpadRight, ImGuiKey_RightArrow)) return 4;
+    return 0;
+  };
+  const int dir = held_dir();
+  bool nav_fire = false;
+  {
+    using namespace std::chrono_literals;
+    const auto now = std::chrono::steady_clock::now();
+    if (dir != nav_dir_) {
+      nav_dir_ = dir;
+      nav_fire = dir != 0;
+      nav_next_repeat_ = now + 400ms;
+    } else if (dir != 0 && now >= nav_next_repeat_) {
+      nav_fire = true;
+      nav_next_repeat_ = now + 150ms;
+    }
+  }
+  if (inputs_armed_ && !closing_) {
+    const bool up = nav_fire && dir == 1;
+    const bool down = nav_fire && dir == 2;
+    const bool left = nav_fire && dir == 3;
+    const bool right = nav_fire && dir == 4;
+    const bool accept =
+        pressed(ImGuiKey_GamepadFaceDown) || pressed(ImGuiKey_Enter);
+    const bool back =
+        pressed(ImGuiKey_GamepadFaceRight) || pressed(ImGuiKey_Escape);
+    if (up || down) {
+      row_ = (row_ + (down ? 1 : kRowCount - 1)) % kRowCount;
+      confirm_exit_ = false;
+    }
+    if (row_ == kCpuSpeed && (left || right || accept)) {
+      int next = speed_index + (left ? -1 : 1);
+      if (accept && next > 2) next = 0;
+      next = std::clamp(next, 0, 2);
+      Clock::set_guest_time_scalar(kSpeeds[next]);
+      speed_index = next;
+    } else if (accept) {
+      switch (row_) {
+        case kResume:
+          closing_ = true;
+          break;
+        case kVibration:
+          emulator_window_.ToggleControllerVibration();
+          break;
+        case kClearCache:
+          emulator_window_.GpuClearCaches();
+          cache_note_ = 2.0f;
+          break;
+        case kExit:
+          if (confirm_exit_) {
+            UWP::RestartApp();
+          } else {
+            confirm_exit_ = true;
+          }
+          break;
+        default:
+          break;
+      }
+    } else if (back) {
+      if (confirm_exit_) {
+        confirm_exit_ = false;
+      } else {
+        closing_ = true;
+      }
+    }
+  }
+  cache_note_ = std::max(0.0f, cache_note_ - dt);
+
+  // ---- Draw --------------------------------------------------------------
+  ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
+  ImGui::SetNextWindowSize(ds);
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+  ImGui::Begin("##xenon_quick_menu", nullptr,
+               ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
+                   ImGuiWindowFlags_NoSavedSettings |
+                   ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoNav);
+  ImDrawList* dl = ImGui::GetWindowDrawList();
+
+  // Dim the paused game.
+  dl->AddRectFilled(ImVec2(0, 0), ds, C(6, 8, 20, 150));
+  {
+    const float px = 64.0f * s, py = 58.0f * s, h = 24.0f * s;
+    dl->AddRectFilled(ImVec2(px, py), ImVec2(px + 7 * s, py + h),
+                      C(232, 233, 255, 235), 2.0f * s);
+    dl->AddRectFilled(ImVec2(px + 13 * s, py), ImVec2(px + 20 * s, py + h),
+                      C(232, 233, 255, 235), 2.0f * s);
+    dl->AddText(ui_font, 22.0f * s, ImVec2(px + 36 * s, py + 1 * s),
+                C(232, 233, 255, 235), Tr("PAUSED"));
+  }
+
+  // Side panel.
+  const float pw = 640.0f * s;
+  const float x0 = ds.x - pw * a;
+  dl->AddRectFilled(ImVec2(x0, 0), ImVec2(x0 + pw, ds.y), C(14, 15, 34, 255));
+  dl->AddLine(ImVec2(x0, 0), ImVec2(x0, ds.y), C(255, 255, 255, 22),
+              1.5f * s);
+  const float pad = 56.0f * s;
+  const float cx = x0 + pad;
+  const float cw = pw - pad * 2.0f;
+  float y = 110.0f * s;
+
+  // Header: title name, ID and session time.
+  {
+    std::string name = emulator->title_name();
+    if (name.empty()) name = "Xbox 360";
+    const float title_size = 46.0f * s;
+    dl->AddText(display_font, title_size, ImVec2(cx, y), C(255, 255, 255, 255),
+                name.c_str(), nullptr, cw);
+    y += display_font->CalcTextSizeA(title_size, FLT_MAX, cw, name.c_str()).y +
+         14.0f * s;
+    const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+                             std::chrono::steady_clock::now() -
+                             emulator_window_.title_start_time_)
+                             .count();
+    const std::string time =
+        elapsed >= 3600
+            ? fmt::format("{}:{:02}:{:02}", elapsed / 3600,
+                          (elapsed / 60) % 60, elapsed % 60)
+            : fmt::format("{}:{:02}", elapsed / 60, elapsed % 60);
+    const std::string sub =
+        fmt::format("{:08X}   {}", emulator->title_id(),
+                    fmt::format(fmt::runtime(Tr("Playing for {}")), time));
+    dl->AddText(ui_font, 22.0f * s, ImVec2(cx, y), C(154, 156, 192, 255),
+                sub.c_str());
+    y += 70.0f * s;
+  }
+
+  // Rows.
+  const float row_h = 72.0f * s;
+  const float row_gap = 12.0f * s;
+  const float text_size = 27.0f * s;
+  const char* labels[kRowCount] = {Tr("Resume"), Tr("CPU speed"),
+                                   Tr("Vibration"), Tr("Clear GPU cache"),
+                                   Tr("Exit game")};
+  for (int i = 0; i < kRowCount; ++i) {
+    const bool selected = i == row_;
+    const bool danger = i == kExit;
+    const float ry = y + i * (row_h + row_gap) + (danger ? 18.0f * s : 0.0f);
+    const ImVec2 mn(cx, ry), mx(cx + cw, ry + row_h);
+    const float r = row_h * 0.5f;
+    if (selected) {
+      dl->AddRectFilled(
+          mn, mx, danger ? C(214, 64, 82, 235) : C(112, 108, 255, 225), r);
+      dl->AddRect(mn, mx, C(220, 222, 255, 90), r, 0, 1.5f * s);
+    } else {
+      dl->AddRectFilled(mn, mx,
+                        danger ? C(255, 90, 90, 30) : C(255, 255, 255, 12), r);
+    }
+    const ImU32 text_col =
+        selected ? C(255, 255, 255, 255)
+                 : (danger ? C(255, 154, 154, 255) : C(220, 222, 245, 255));
+    const float ty = ry + (row_h - text_size) * 0.5f;
+    dl->AddText(ui_font, text_size, ImVec2(cx + 30.0f * s, ty), text_col,
+                labels[i]);
+
+    const float right = mx.x - 30.0f * s;
+    if (i == kCpuSpeed) {
+      const char* value = kSpeedNames[speed_index];
+      const float vw = ui_font->CalcTextSizeA(text_size, FLT_MAX, 0, value).x;
+      const float ah = 9.0f * s, mid = ry + row_h * 0.5f;
+      const ImU32 arrow_col =
+          selected ? C(255, 255, 255, 255) : C(154, 156, 192, 255);
+      dl->AddTriangleFilled(ImVec2(right, mid), ImVec2(right - ah, mid - ah),
+                            ImVec2(right - ah, mid + ah), arrow_col);
+      const float vx = right - ah - 14.0f * s - vw;
+      dl->AddText(ui_font, text_size, ImVec2(vx, ty), text_col, value);
+      const float lx = vx - 14.0f * s;
+      dl->AddTriangleFilled(ImVec2(lx - ah, mid), ImVec2(lx, mid - ah),
+                            ImVec2(lx, mid + ah), arrow_col);
+    } else if (i == kVibration) {
+      const float tw = 56.0f * s, th = 30.0f * s;
+      const ImVec2 tmn(right - tw, ry + (row_h - th) * 0.5f);
+      const ImVec2 tmx(right, tmn.y + th);
+      dl->AddRectFilled(tmn, tmx,
+                        vibration_on ? (selected ? C(255, 255, 255, 90)
+                                                 : C(112, 108, 255, 255))
+                                     : C(255, 255, 255, 40),
+                        th * 0.5f);
+      const float kx = vibration_on ? tmx.x - th * 0.5f : tmn.x + th * 0.5f;
+      dl->AddCircleFilled(ImVec2(kx, tmn.y + th * 0.5f), th * 0.5f - 4.0f * s,
+                          C(245, 246, 255, 255));
+    } else if (i == kClearCache && cache_note_ > 0.0f) {
+      const char* note = Tr("GPU cache cleared");
+      const float note_size = 21.0f * s;
+      const float nw = ui_font->CalcTextSizeA(note_size, FLT_MAX, 0, note).x;
+      dl->AddText(ui_font, note_size,
+                  ImVec2(right - nw, ry + (row_h - note_size) * 0.5f),
+                  selected ? C(255, 255, 255, 220) : C(150, 220, 170, 255),
+                  note);
+    }
+  }
+  if (confirm_exit_) {
+    const float wy = y + kRowCount * (row_h + row_gap) + 24.0f * s;
+    dl->AddText(ui_font, 21.0f * s, ImVec2(cx + 6.0f * s, wy),
+                C(255, 154, 154, 255),
+                Tr("Press A again to exit. Unsaved progress will be lost."),
+                nullptr, cw - 12.0f * s);
+  }
+
+  // Footer button hints.
+  {
+    float fx = cx;
+    const float fy = ds.y - 92.0f * s;
+    const float rad = 17.0f * s;
+    auto hint = [&](const char* letter, ImU32 ring, const char* text) {
+      const ImVec2 c(fx + rad, fy + rad);
+      dl->AddCircle(c, rad, ring, 0, 2.0f * s);
+      const float ls = 20.0f * s;
+      const ImVec2 lsz = ui_font->CalcTextSizeA(ls, FLT_MAX, 0, letter);
+      dl->AddText(ui_font, ls, ImVec2(c.x - lsz.x * 0.5f, c.y - lsz.y * 0.5f),
+                  ring, letter);
+      const float ts = 23.0f * s;
+      dl->AddText(ui_font, ts,
+                  ImVec2(fx + rad * 2 + 12.0f * s, c.y - ts * 0.5f),
+                  C(220, 222, 245, 255), text);
+      fx += rad * 2 + 12.0f * s +
+            ui_font->CalcTextSizeA(ts, FLT_MAX, 0, text).x + 34.0f * s;
+    };
+    hint("A", C(92, 214, 120, 255), Tr("Select"));
+    hint("B", C(255, 99, 112, 255), Tr("Back"));
+  }
+
+  ImGui::End();
+  ImGui::PopStyleVar(2);
 }
 
 void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {

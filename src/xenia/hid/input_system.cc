@@ -7,6 +7,8 @@
  ******************************************************************************
  */
 
+#include <cstring>
+
 #include "xenia/base/logging.h"
 
 #include "xenia/hid/input_system.h"
@@ -135,6 +137,17 @@ X_RESULT InputSystem::GetState(uint32_t user_index, uint32_t flags,
       UpdateUsedSlot(driver, user_index, true);
       AdjustDeadzoneLevels(user_index, &out_state->gamepad);
 
+      constexpr uint16_t kQuickMenuCombo =
+          X_INPUT_GAMEPAD_BACK | X_INPUT_GAMEPAD_START;
+      if (guest_input_blocked_) {
+        std::memset(&out_state->gamepad, 0, sizeof(out_state->gamepad));
+      } else if ((out_state->gamepad.buttons & kQuickMenuCombo) ==
+                 kQuickMenuCombo) {
+        // View + Menu opens Xenon's quick menu; keep it from the game.
+        out_state->gamepad.buttons =
+            out_state->gamepad.buttons & ~kQuickMenuCombo;
+      }
+
       if (out_state->gamepad.buttons != 0) {
         last_used_slot = user_index;
       }
@@ -142,6 +155,16 @@ X_RESULT InputSystem::GetState(uint32_t user_index, uint32_t flags,
     }
   }
   UpdateUsedSlot(nullptr, user_index, false);
+  return X_ERROR_DEVICE_NOT_CONNECTED;
+}
+
+X_RESULT InputSystem::GetHostState(uint32_t user_index,
+                                   X_INPUT_STATE* out_state) {
+  for (auto& driver : drivers_) {
+    if (driver->GetState(user_index, out_state) == X_ERROR_SUCCESS) {
+      return X_ERROR_SUCCESS;
+    }
+  }
   return X_ERROR_DEVICE_NOT_CONNECTED;
 }
 
@@ -161,6 +184,10 @@ X_RESULT InputSystem::SetState(uint32_t user_index,
 X_RESULT InputSystem::GetKeystroke(uint32_t user_index, uint32_t flags,
                                    X_INPUT_KEYSTROKE* out_keystroke) {
   SCOPE_profile_cpu_f("hid");
+
+  if (guest_input_blocked_) {
+    return X_ERROR_EMPTY;
+  }
 
   std::vector<InputDriver*> filtered_drivers = FilterDrivers(flags);
 

@@ -49,6 +49,8 @@ void SetDPI(int DPI);
 bool IsUIOpen();
 void SetUIOpen(bool is_open);
 void LaunchUri(const std::string& url);
+// Restarts Xenon (back to the library); exits if a restart isn't possible.
+void RestartApp();
 void DownloadAndExtractZip(const std::string& url,
                            const std::string& dest_folder,
                            std::function<void(bool, std::string)> callback);

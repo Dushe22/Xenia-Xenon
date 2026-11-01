@@ -176,6 +176,21 @@ void LaunchUri(const std::string& url) {
   LaunchUriAsync(url);
 }
 
+void RestartApp() {
+  using winrt::Windows::ApplicationModel::Core::AppRestartFailureReason;
+  using winrt::Windows::ApplicationModel::Core::CoreApplication;
+  try {
+    CoreApplication::RequestRestartAsync(L"").Completed(
+        [](auto const& op, auto) {
+          if (op.GetResults() != AppRestartFailureReason::RestartPending) {
+            CoreApplication::Exit();
+          }
+        });
+  } catch (...) {
+    CoreApplication::Exit();
+  }
+}
+
 static bool s_download_in_progress = false;
 static float s_download_progress = 0.0f;
 static std::unordered_map<std::string, UWP::UnityGameMetadata> s_unity_metadata_cache;

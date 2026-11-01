@@ -10,6 +10,7 @@
 #ifndef XENIA_HID_INPUT_SYSTEM_H_
 #define XENIA_HID_INPUT_SYSTEM_H_
 
+#include <atomic>
 #include <bitset>
 #include <memory>
 #include <vector>
@@ -44,6 +45,11 @@ class InputSystem {
   X_RESULT GetState(uint32_t user_index, uint32_t flags,
                     X_INPUT_STATE* out_state);
   X_RESULT SetState(uint32_t user_index, X_INPUT_VIBRATION* vibration);
+  // Reads the controller for Xenon's own UI, ignoring the guest input block.
+  X_RESULT GetHostState(uint32_t user_index, X_INPUT_STATE* out_state);
+  // While set, games see an idle controller (Xenon's quick menu is open).
+  void set_guest_input_blocked(bool blocked) { guest_input_blocked_ = blocked; }
+  bool guest_input_blocked() const { return guest_input_blocked_; }
   X_RESULT GetKeystroke(uint32_t user_index, uint32_t flags,
                         X_INPUT_KEYSTROKE* out_keystroke);
 
@@ -76,6 +82,7 @@ class InputSystem {
   xe::ui::Window* window_ = nullptr;
 
   std::vector<std::unique_ptr<InputDriver>> drivers_;
+  std::atomic<bool> guest_input_blocked_{false};
 
   std::unique_ptr<Portal> portal_;
 

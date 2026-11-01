@@ -10,6 +10,8 @@
 #ifndef XENIA_APP_EMULATOR_WINDOW_H_
 #define XENIA_APP_EMULATOR_WINDOW_H_
 
+#include <atomic>
+#include <chrono>
 #include <filesystem>
 #include <map>
 #include <memory>
@@ -405,6 +407,39 @@ class EmulatorWindow {
     Emulator::ContentInstallEntry entry;
     std::string description;
   };
+
+#if XE_PLATFORM_WINRT
+  // In-game quick menu, opened with View + Menu. Pauses the title while open.
+  class QuickMenuDialog final : public ui::ImGuiDialog {
+   public:
+    QuickMenuDialog(ui::ImGuiDrawer* imgui_drawer,
+                    EmulatorWindow& emulator_window)
+        : ui::ImGuiDialog(imgui_drawer), emulator_window_(emulator_window) {}
+    void RequestClose() { closing_ = true; }
+
+   protected:
+    void OnDraw(ImGuiIO& io) override;
+    void OnClose() override;
+
+   private:
+    EmulatorWindow& emulator_window_;
+    int row_ = 0;
+    float anim_ = 0.0f;       // 0..1 slide-in.
+    bool closing_ = false;    // Sliding out, then Close().
+    bool confirm_exit_ = false;
+    float cache_note_ = 0.0f;  // Seconds left on "GPU cache cleared".
+    bool inputs_armed_ = false;  // Ignore buttons held when it opened.
+    int nav_dir_ = 0;  // Direction currently held (0 = none).
+    std::chrono::steady_clock::time_point nav_next_repeat_{};
+  };
+
+  void ToggleQuickMenu();
+  void QuickMenuWatcher();
+  QuickMenuDialog* quick_menu_ = nullptr;  // UI thread only.
+  std::atomic<bool> quick_menu_open_{false};
+  std::atomic<bool> quick_menu_unblock_pending_{false};
+  std::chrono::steady_clock::time_point title_start_time_{};
+#endif  // XE_PLATFORM_WINRT
 
   enum class DlcInstallMode { kManual, kAutoDownload };
 

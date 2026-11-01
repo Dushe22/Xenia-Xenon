@@ -371,6 +371,8 @@ class Emulator {
   std::unique_ptr<kernel::util::GameInfoDatabase> game_info_database_;
 
   bool paused_;
+  // Threads suspended by Pause(), resumed by Resume().
+  std::vector<kernel::object_ref<kernel::XThread>> paused_threads_;
   bool restoring_;
   threading::Fence restore_fence_;  // Fired on restore finish.
 };

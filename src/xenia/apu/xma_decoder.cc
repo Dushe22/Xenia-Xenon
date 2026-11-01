@@ -409,6 +409,12 @@ void XmaDecoder::Pause() {
   }
   paused_ = true;
 
+  if (!cvars::use_dedicated_xma_thread || !worker_thread_) {
+    return;
+  }
+  // The worker may be idle on work_event_; wake it so it reaches the
+  // pause check.
+  work_event_->Set();
   pause_fence_.Wait();
 }
 

@@ -103,6 +103,12 @@ void AudioSystem::WorkerThreadMain() {
   // a host output slot is free, otherwise it is dropped (the host queue
   // is full, so it is already well buffered).
   while (worker_running_) {
+    if (paused_) {
+      pause_fence_.Signal();
+      xe::threading::Wait(resume_event_.get(), false);
+      continue;
+    }
+
     const uint64_t now = static_cast<uint64_t>(
         std::chrono::duration_cast<std::chrono::microseconds>(
             std::chrono::steady_clock::now().time_since_epoch())

@@ -101,7 +101,7 @@ class AudioSystem {
   // Event is always there in case we have no clients.
   std::unique_ptr<xe::threading::Event> pending_work_event_;
 
-  bool paused_ = false;
+  std::atomic<bool> paused_ = false;
   threading::Fence pause_fence_;
   std::unique_ptr<threading::Event> resume_event_;
 };
