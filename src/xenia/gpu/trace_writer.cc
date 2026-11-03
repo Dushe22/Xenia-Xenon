@@ -131,6 +131,10 @@ void TraceWriter::EndMemoryFrame(bool next_is_keyframe, uint32_t max_groups,
   {
     std::lock_guard<std::mutex> lock(memory_mutex_);
     memory_completed_bytes_ += memory_current_->capacity();
+    if (memory_current_keyframe_) {
+      memory_group_bytes_ = 0;
+    }
+    memory_group_bytes_ += memory_current_->capacity();
     memory_completed_.push_back({memory_current_, memory_current_keyframe_});
     // Drop the oldest groups while over the limits, but always keep the
     // newest complete group (the one before the next keyframe).

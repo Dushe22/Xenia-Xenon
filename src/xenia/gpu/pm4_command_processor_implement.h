@@ -595,15 +595,22 @@ bool COMMAND_PROCESSOR::ExecutePacketType3(uint32_t packet) XE_RESTRICT {
             XELOGI("Rolling capture: stopped");
           } else {
             ++trace_rolling_frames_since_keyframe_;
-            bool keyframe =
-                trace_rolling_frames_since_keyframe_ >=
-                uint32_t(std::max(cvars::trace_rolling_capture_keyframe_frames,
-                                  int32_t(1)));
-            trace_writer_.EndMemoryFrame(
-                keyframe, 2,
+            const uint64_t max_bytes =
                 uint64_t(std::max(cvars::trace_rolling_capture_max_mb,
                                   int32_t(0)))
-                    << 20);
+                << 20;
+            // Two groups are kept, so a group also ends once it reaches half
+            // the memory limit. Heavy scenes (about 11 MB per frame in a WWE
+            // 13 match) otherwise grew one group past the limit, and memory
+            // ran out until the game slowed down and closed.
+            bool keyframe =
+                trace_rolling_frames_since_keyframe_ >=
+                    uint32_t(std::max(
+                        cvars::trace_rolling_capture_keyframe_frames,
+                        int32_t(1))) ||
+                (max_bytes &&
+                 trace_writer_.memory_group_bytes() >= max_bytes / 2);
+            trace_writer_.EndMemoryFrame(keyframe, 2, max_bytes);
             if (keyframe) {
               trace_rolling_frames_since_keyframe_ = 0;
               TraceWriter::MemoryCapture kept =

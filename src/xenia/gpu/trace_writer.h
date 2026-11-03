@@ -49,6 +49,15 @@ class TraceWriter {
   bool is_memory_mode() const { return memory_mode_; }
   // The rolling capture ran out of memory and stopped recording.
   bool memory_failed() const { return memory_failed_; }
+  // Rolling capture: bytes of the group being recorded, from its keyframe
+  // through the current frame.
+  uint64_t memory_group_bytes() const {
+    if (!memory_current_) {
+      return 0;
+    }
+    return (memory_current_keyframe_ ? 0 : memory_group_bytes_) +
+           memory_current_->size();
+  }
 
   bool Open(const std::filesystem::path& path, uint32_t title_id);
   // Rolling capture: frames are kept in memory instead of a file. Every frame
@@ -116,6 +125,7 @@ class TraceWriter {
   bool memory_current_keyframe_ = false;
   // Running average of the non-keyframe frame sizes, to reserve new frames.
   size_t memory_frame_size_estimate_ = 0;
+  uint64_t memory_group_bytes_ = 0;
   bool memory_failed_ = false;
   // Guarded by memory_mutex_ (read by the thread saving a capture).
   std::deque<MemorySegment> memory_completed_;
@@ -133,6 +143,7 @@ class TraceWriter {
   static constexpr bool is_open() { return false; }
   static constexpr bool is_memory_mode() { return false; }
   static constexpr bool memory_failed() { return false; }
+  static constexpr uint64_t memory_group_bytes() { return 0; }
 
   static constexpr bool Open(const std::filesystem::path& path,
                              uint32_t title_id) {
