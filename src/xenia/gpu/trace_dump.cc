@@ -9,15 +9,22 @@
 
 #include "xenia/gpu/trace_dump.h"
 
+#include <cstdio>
+#include <cstring>
+#include <vector>
+
 #include "third_party/stb/stb_image_write.h"
+#include "xenia/base/byte_order.h"
 #include "xenia/base/filesystem.h"
 #include "xenia/base/logging.h"
+#include "xenia/base/math.h"
 #include "xenia/base/profiling.h"
 #include "xenia/base/string.h"
 #include "xenia/base/threading.h"
 #include "xenia/gpu/command_processor.h"
 #include "xenia/gpu/gpu_flags.h"
 #include "xenia/gpu/graphics_system.h"
+#include "xenia/gpu/texture_address.h"
 #include "xenia/memory.h"
 #include "xenia/ui/file_picker.h"
 #include "xenia/ui/presenter.h"
@@ -39,6 +46,13 @@
 DEFINE_path(target_trace_file, "", "Specifies the trace file to load.",
             "GPU.Debug");
 DEFINE_path(trace_dump_path, "", "Output path for dumped files.", "GPU.Debug");
+DEFINE_string(
+    trace_dump_textures, "",
+    "Comma-separated base:width:height (hex base, decimal size) of tiled "
+    "32bpp textures to save from guest memory after the replay, as raw "
+    "untiled byte-swapped RGBA (<output>_<base>.rgba). Use with "
+    "readback_resolve=full so resolve results reach guest memory.",
+    "GPU.Debug");
 
 namespace xe {
 namespace gpu {
@@ -140,6 +154,47 @@ int TraceDump::Run() {
       static_cast<int>(player_->current_frame()->commands.size() - 1));
   player_->WaitOnPlayback();
   EndHostCapture();
+
+  // Save requested tiled 32bpp textures from guest memory, untiled.
+  if (!cvars::trace_dump_textures.empty()) {
+    std::string spec = cvars::trace_dump_textures;
+    size_t pos = 0;
+    while (pos <= spec.size()) {
+      size_t comma = spec.find(',', pos);
+      if (comma == std::string::npos) {
+        comma = spec.size();
+      }
+      const std::string item = spec.substr(pos, comma - pos);
+      pos = comma + 1;
+      uint32_t base = 0, width = 0, height = 0;
+      if (std::sscanf(item.c_str(), "%x:%u:%u", &base, &width, &height) != 3 ||
+          !width || !height) {
+        continue;
+      }
+      const uint32_t pitch_aligned = xe::align(width, 32u);
+      const uint8_t* src =
+          emulator_->memory()->TranslatePhysical<const uint8_t*>(base &
+                                                                 0x1FFFFFFF);
+      std::vector<uint32_t> pixels(size_t(width) * height);
+      for (uint32_t y = 0; y < height; ++y) {
+        for (uint32_t x = 0; x < width; ++x) {
+          const int32_t offset = texture_address::Tiled2D(
+              int32_t(x), int32_t(y), pitch_aligned, 2);
+          uint32_t value;
+          std::memcpy(&value, src + offset, sizeof(value));
+          pixels[size_t(y) * width + x] = xe::byte_swap(value);
+        }
+      }
+      std::filesystem::path raw_path = base_output_path_;
+      raw_path += fmt::format("_{:08X}_{}x{}.rgba", base, width, height);
+      if (FILE* f = filesystem::OpenFile(raw_path, "wb")) {
+        fwrite(pixels.data(), sizeof(uint32_t), pixels.size(), f);
+        fclose(f);
+        XELOGI("Trace dump: saved texture {:08X} ({}x{})", base, width,
+               height);
+      }
+    }
+  }
 
   // Capture.
   int result = 0;

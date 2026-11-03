@@ -17,6 +17,16 @@
 #include "xenia/gpu/gpu_flags.h"
 #include "xenia/gpu/shared_memory.h"
 
+#include <sstream>
+#include <unordered_set>
+
+DEFINE_string(
+    gpu_invalid_fetch_null_list, "",
+    "Debugging: comma-separated hex dword_1 values of \"invalid\" type "
+    "texture fetch constants to bind as no texture even when "
+    "gpu_allow_invalid_fetch_constants is on.",
+    "GPU.Debug");
+
 DEFINE_int32(
     draw_resolution_scale_x, 1,
     "Integer pixel width scale used for scaling the rendering resolution "
@@ -987,7 +997,23 @@ void TextureCache::BindingInfoFromFetchConstant(
       break;
     case xenos::FetchConstantType::kInvalidTexture:
       if (cvars::gpu_allow_invalid_fetch_constants) {
-        break;
+        static const std::unordered_set<uint32_t> null_list = [] {
+          std::unordered_set<uint32_t> list;
+          std::stringstream ss(cvars::gpu_invalid_fetch_null_list);
+          std::string item;
+          while (std::getline(ss, item, ',')) {
+            if (!item.empty()) {
+              list.insert(uint32_t(std::stoul(item, nullptr, 16)));
+            }
+          }
+          return list;
+        }();
+        if (null_list.empty() || !null_list.count(fetch.dword_1)) {
+          break;
+        }
+        XELOGW("Invalid texture fetch constant {:08X} bound as no texture",
+               fetch.dword_1);
+        return;
       }
       XELOGW(
           "Texture fetch constant ({:08X} {:08X} {:08X} {:08X} {:08X} {:08X}) "

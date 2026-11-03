@@ -68,6 +68,14 @@ class D3D12RenderTargetCache final : public RenderTargetCache {
               uint32_t normalized_color_mask, const Shader& vertex_shader,
               int32_t window_offset_tiles) override;
 
+  // Debugging: dump the bound depth buffer and log its non-zero values.
+  void DebugProbeCurrentDepth(uint32_t draw_index);
+  // Debugging: copy the bound 1x depth buffer to a readback slot without
+  // waiting (keeps it in DEPTH_WRITE for the draw), and log the copies after
+  // the GPU has been awaited.
+  void DebugCopyBoundDepth(uint32_t slot);
+  void DebugLogBoundDepthCopies(uint32_t draw_index);
+
   void InvalidateCommandListRenderTargets() {
     are_current_command_list_render_targets_valid_ = false;
   }
@@ -749,6 +757,9 @@ class D3D12RenderTargetCache final : public RenderTargetCache {
   // Writes contents of host render targets within rectangles from
   // ResolveInfo::GetCopyEdramTileSpan to edram_buffer_ - with the plain 1x1
   // tile layout if native_layout is set.
+  void DebugProbeDepthDump(uint32_t dump_base, uint32_t dump_row_length_used,
+                           uint32_t dump_rows, uint32_t dump_pitch,
+                           bool native_layout);
   void DumpRenderTargets(uint32_t dump_base, uint32_t dump_row_length_used,
                          uint32_t dump_rows, uint32_t dump_pitch,
                          bool native_layout);

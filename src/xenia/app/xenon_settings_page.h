@@ -365,6 +365,7 @@ inline const std::vector<Category>& Categories() {
           Toggle("Submit on primary buffer end",
                  "d3d12_submit_on_primary_buffer_end"),
           Toggle("Clear memory page state", "clear_memory_page_state"),
+          Toggle("Shader depth fix", "d3d12_shader_depth_fix"),
           Toggle("Tiled shared memory", "d3d12_enable_tiled_shared_memory",
                  "Keep this off on Xbox, otherwise games will crash.")}});
     c.push_back({"Audio",
@@ -562,6 +563,9 @@ inline const std::vector<Category>& Categories() {
          "update, at a performance cost."},
         {"d3d12_enable_tiled_shared_memory",
          "Uses tiled resources for the emulated shared memory."},
+        {"d3d12_shader_depth_fix",
+         "Fixes see-through or invisible characters in some games, such as WWE "
+         "13. Restart the game after changing it."},
         {"apu",
          "Audio output used by the emulator. Automatic picks the best one for "
          "this console. Disabled turns sound off."},

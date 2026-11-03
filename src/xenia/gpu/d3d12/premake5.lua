@@ -53,9 +53,11 @@ if enableMiscSubprojects then
       "mspack",
       "snappy",
       "xxhash",
+      "windowsapp",
     })
     files({
       "d3d12_trace_viewer_main.cc",
+      "trace_tool_uwp_stubs_main.cc",
       "../../ui/windowed_app_main_"..platform_suffix..".cc",
     })
     -- Only create the .user file if it doesn't already exist.
@@ -106,9 +108,11 @@ if enableMiscSubprojects then
       "mspack",
       "snappy",
       "xxhash",
+      "windowsapp",
     })
     files({
       "d3d12_trace_dump_main.cc",
+      "trace_tool_uwp_stubs_main.cc",
       "../../base/console_app_main_"..platform_suffix..".cc",
     })
     -- Only create the .user file if it doesn't already exist.

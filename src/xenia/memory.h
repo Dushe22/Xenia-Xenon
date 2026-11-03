@@ -10,6 +10,7 @@
 #ifndef XENIA_MEMORY_H_
 #define XENIA_MEMORY_H_
 
+#include <atomic>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -78,6 +79,15 @@ inline xe::memory::PageAccess ToPageAccess(uint32_t protect) {
 }
 
 // Equivalent to the Win32 MEMORY_BASIC_INFORMATION struct.
+// Some games probe for the largest free block by retrying allocations
+// hundreds of times; logging every failure stalls the game on slow storage.
+// Logs the first 64 failures, then one in 1024.
+inline bool ShouldLogAllocFailure() {
+  static std::atomic<uint32_t> failures{0};
+  const uint32_t n = failures.fetch_add(1, std::memory_order_relaxed);
+  return n < 64 || (n % 1024) == 0;
+}
+
 struct HeapAllocationInfo {
   // A pointer to the base address of the region of pages.
   uint32_t base_address;

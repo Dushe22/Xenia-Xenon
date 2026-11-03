@@ -905,6 +905,9 @@ class DxbcShaderTranslator : public ShaderTranslator {
   // alpha can be exponent-biased. Also narrows the ZPD coverage temp by the
   // alpha to coverage mask.
   void CompletePixelShader_AlphaToMask(uint32_t zpd_coverage_temp = UINT32_MAX);
+  // Whether SV_Coverage is left out because the shader writes depth (see
+  // d3d12_shader_depth_fix). RTV path only.
+  bool IsCoverageOutputSkippedForDepth() const;
   void CompletePixelShader_WriteToRTVs();
   void CompletePixelShader_DSV_DepthTo24Bit();
   void CompletePixelShader_WriteToROV();

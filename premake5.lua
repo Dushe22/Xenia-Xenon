@@ -1,5 +1,6 @@
 -- Compatibility shim: bundled premake predates linktimeoptimization().
 if not linktimeoptimization then function linktimeoptimization(_) end end
+if not wholelib then function wholelib(_) end end
 
 include("tools/build")
 if _ACTION == "export-compile-commands" then
@@ -19,7 +20,7 @@ objdir(build_obj)
 -- Define variables for enabling specific submodules
 -- Todo: Add changing from xb command
 enableTests = false
-enableMiscSubprojects = false
+enableMiscSubprojects = os.getenv("XE_MISC_SUBPROJECTS") == "1"
 
 -- Define an ARCH variable
 -- Only use this to enable architecture-specific functionality.
@@ -50,9 +51,12 @@ symbols("On")
 
 -- TODO(DrChat): Find a way to disable this on other architectures.
 if ARCH ~= "ppc64" then
-  filter("architecture:x86_64")
-    vectorextensions("AVX")
-  filter({})
+  -- XE_NO_AVX=1 builds for hosts without AVX (PC GPU trace tools only).
+  if os.getenv("XE_NO_AVX") ~= "1" then
+    filter("architecture:x86_64")
+      vectorextensions("AVX")
+    filter({})
+  end
 end
 
 filter("kind:StaticLib")

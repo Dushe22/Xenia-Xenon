@@ -12,6 +12,9 @@
 #include "xenia/apu/audio_system.h"
 #include "xenia/base/assert.h"
 #include "xenia/base/byte_order.h"
+#include "xenia/gpu/texture_address.h"
+#include "xenia/base/filesystem.h"
+#include <cstdio>
 #include "xenia/base/cvar.h"
 #include "xenia/base/logging.h"
 #include "xenia/base/math.h"
@@ -46,9 +49,51 @@ DEFINE_bool(d3d12_clear_memory_page_state, true,
 DECLARE_bool(clear_memory_page_state);
 DECLARE_bool(readback_resolve_half_pixel_offset);
 
+DECLARE_bool(d3d12_debug_depth_probe);
+DECLARE_path(trace_dump_path);
+DEFINE_string(
+    d3d12_debug_gpu_texture_dumps, "",
+    "Debugging: comma-separated draw:base:width:height (decimal draw index "
+    "from the draw probe log, hex base) of tiled 32bpp textures to copy from "
+    "the GPU's guest memory buffer just before that draw (breaks that draw), "
+    "saved untiled as <trace_dump_path>_gpu_<draw>_<base>.rgba.",
+    "D3D12");
+DEFINE_bool(d3d12_debug_probe_texture_memory, false,
+            "Debugging: with d3d12_debug_depth_probe, read back the guest "
+            "memory of depth textures used by depth-writing draws (breaks "
+            "the draw it's done for).",
+            "D3D12");
+DEFINE_string(
+    d3d12_debug_depth_probe_draws, "",
+    "Debugging: comma-separated draw indices (as numbered by the draw "
+    "probe log) after which the current depth buffer is dumped and its "
+    "non-zero value count logged. Requires d3d12_debug_depth_probe.",
+    "D3D12");
+
 namespace xe {
 namespace gpu {
 namespace d3d12 {
+// Debugging: whether the draw index is in d3d12_debug_depth_probe_draws.
+static bool IsDebugProbeDraw(uint32_t draw_index) {
+  static const std::vector<uint32_t> probe_draws = [] {
+    std::vector<uint32_t> list;
+    const std::string& s = cvars::d3d12_debug_depth_probe_draws;
+    size_t pos = 0;
+    while (pos < s.size()) {
+      size_t comma = s.find(',', pos);
+      if (comma == std::string::npos) {
+        comma = s.size();
+      }
+      if (comma > pos) {
+        list.push_back(uint32_t(std::stoul(s.substr(pos, comma - pos))));
+      }
+      pos = comma + 1;
+    }
+    return list;
+  }();
+  return std::find(probe_draws.begin(), probe_draws.end(), draw_index) !=
+         probe_draws.end();
+}
 
 // Generated with `xb buildshaders`.
 namespace shaders {
@@ -3139,6 +3184,161 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
   SetPrimitiveTopology(primitive_topology);
   // Must not call anything that may change the primitive topology from now on!
 
+  if (cvars::d3d12_debug_depth_probe) {
+    static uint32_t debug_draw_index = 0;
+    debug_probe_draw_index_ = debug_draw_index;
+    XELOGI(
+        "Draw probe {}: VS {:016X} PS {:016X} prim {} verts {} depthctl "
+        "{:08X} colormask {:04X} rts {:X} depth fmt {} pipeline {} zpd {} viz "
+        "{} armed {} psdepth {}",
+        debug_draw_index++, vertex_shader->ucode_data_hash(),
+        pixel_shader ? pixel_shader->ucode_data_hash() : 0,
+        uint32_t(primitive_processing_result.host_primitive_type),
+        primitive_processing_result.host_draw_vertex_count,
+        normalized_depth_control.value, normalized_color_mask,
+        bound_depth_and_color_render_target_bits,
+        bound_depth_and_color_render_target_formats[0],
+        pipeline_cache_->GetD3D12PipelineByHandle(pipeline_handle) ? 1 : 0,
+        zpd_hybrid ? 1 : 0, viz_survey ? 1 : 0,
+        (viz_predicate_buffer_ && IsVIZPredicateArmed()) ? 1 : 0,
+        (pixel_shader && pixel_shader->writes_depth()) ? 1 : 0);
+    {
+      uint32_t probe_textures = used_texture_mask;
+      uint32_t probe_index;
+      while (xe::bit_scan_forward(probe_textures, &probe_index)) {
+        probe_textures &= ~(uint32_t(1) << probe_index);
+        xenos::xe_gpu_texture_fetch_t fetch = regs.GetTextureFetch(probe_index);
+        XELOGI("Draw probe uses tf{} {:08X} format {} {}x{}", probe_index,
+               fetch.base_address << 12, uint32_t(fetch.format),
+               fetch.size_2d.width + 1, fetch.size_2d.height + 1);
+      }
+    }
+    if (pixel_shader && pixel_shader->writes_depth()) {
+      if (cvars::d3d12_debug_probe_texture_memory) {
+        // Read the depth texture's guest memory as the GPU sees it.
+        xenos::xe_gpu_texture_fetch_t fetch0 = regs.GetTextureFetch(0);
+        uint32_t probe_base = fetch0.base_address << 12;
+        uint32_t probe_size = 0x398000;
+        ID3D12Resource* probe_readback = RequestReadbackBuffer(probe_size);
+        if (probe_readback) {
+          shared_memory_->UseAsCopySource();
+          SubmitBarriers();
+          deferred_command_list_.D3DCopyBufferRegion(
+              probe_readback, 0, shared_memory_->GetBuffer(), probe_base,
+              probe_size);
+          if (AwaitAllQueueOperationsCompletion()) {
+            D3D12_RANGE probe_range = {0, probe_size};
+            void* probe_mapping;
+            if (SUCCEEDED(probe_readback->Map(0, &probe_range,
+                                              &probe_mapping))) {
+              const uint32_t* words =
+                  reinterpret_cast<const uint32_t*>(probe_mapping);
+              uint32_t nonzero = 0, first = 0;
+              for (uint32_t i = 0; i < probe_size / 4; ++i) {
+                if (words[i]) {
+                  ++nonzero;
+                  if (!first) {
+                    first = words[i];
+                  }
+                }
+              }
+              const uint32_t* guest = reinterpret_cast<const uint32_t*>(
+                  memory_->TranslatePhysical(probe_base));
+              uint32_t guest_nonzero = 0;
+              for (uint32_t i = 0; i < probe_size / 4; ++i) {
+                guest_nonzero += guest[i] ? 1 : 0;
+              }
+              XELOGI(
+                  "Draw probe tf0 memory {:08X}: GPU {} non-zero (first "
+                  "{:08X}), CPU {} non-zero",
+                  probe_base, nonzero, first, guest_nonzero);
+              D3D12_RANGE probe_written = {0, 0};
+              probe_readback->Unmap(0, &probe_written);
+            }
+          }
+        }
+      }
+      XELOGI("Draw probe colorcontrol {:08X} modecontrol {:08X}",
+             regs.Get<reg::RB_COLORCONTROL>().value,
+             regs.Get<reg::RB_MODECONTROL>().value);
+      XELOGI("Draw probe viewport: z {} to {}, scale {} {} offset {} {}",
+             viewport_info.z_min, viewport_info.z_max, viewport_info.ndc_scale[2],
+             viewport_info.ndc_scale[0], viewport_info.ndc_offset[2],
+             viewport_info.ndc_offset[0]);
+      for (uint32_t i = 0; i < 2; ++i) {
+        xenos::xe_gpu_texture_fetch_t fetch = regs.GetTextureFetch(i);
+        XELOGI(
+            "Draw probe tf{}: base {:08X} format {} {}x{} type {} dwords "
+            "{:08X} {:08X} {:08X} {:08X} {:08X} {:08X}",
+            i, fetch.base_address << 12, uint32_t(fetch.format),
+            fetch.size_2d.width + 1, fetch.size_2d.height + 1,
+            uint32_t(fetch.type), fetch.dword_0, fetch.dword_1, fetch.dword_2,
+            fetch.dword_3, fetch.dword_4, fetch.dword_5);
+      }
+    }
+  }
+
+  if (cvars::d3d12_debug_depth_probe &&
+      !cvars::d3d12_debug_gpu_texture_dumps.empty()) {
+    const std::string& spec = cvars::d3d12_debug_gpu_texture_dumps;
+    size_t pos = 0;
+    while (pos < spec.size()) {
+      size_t comma = spec.find(',', pos);
+      if (comma == std::string::npos) {
+        comma = spec.size();
+      }
+      std::string item = spec.substr(pos, comma - pos);
+      pos = comma + 1;
+      uint32_t dump_draw, dump_base, dump_width, dump_height;
+      if (std::sscanf(item.c_str(), "%u:%x:%u:%u", &dump_draw, &dump_base,
+                      &dump_width, &dump_height) != 4 ||
+          dump_draw != debug_probe_draw_index_) {
+        continue;
+      }
+      uint32_t pitch_aligned = xe::align(dump_width, 32u);
+      uint32_t dump_size =
+          xe::align(pitch_aligned * xe::align(dump_height, 32u) * 4, 4096u);
+      ID3D12Resource* dump_readback = RequestReadbackBuffer(dump_size);
+      if (!dump_readback) {
+        continue;
+      }
+      shared_memory_->UseAsCopySource();
+      SubmitBarriers();
+      deferred_command_list_.D3DCopyBufferRegion(
+          dump_readback, 0, shared_memory_->GetBuffer(), dump_base & 0x1FFFFFFF,
+          dump_size);
+      if (!AwaitAllQueueOperationsCompletion()) {
+        continue;
+      }
+      D3D12_RANGE dump_range = {0, dump_size};
+      void* dump_mapping;
+      if (FAILED(dump_readback->Map(0, &dump_range, &dump_mapping))) {
+        continue;
+      }
+      const uint8_t* src = static_cast<const uint8_t*>(dump_mapping);
+      std::vector<uint32_t> pixels(size_t(dump_width) * dump_height);
+      for (uint32_t y = 0; y < dump_height; ++y) {
+        for (uint32_t x = 0; x < dump_width; ++x) {
+          int32_t offset = texture_address::Tiled2D(int32_t(x), int32_t(y),
+                                                    pitch_aligned, 2);
+          uint32_t value;
+          std::memcpy(&value, src + offset, sizeof(value));
+          pixels[size_t(y) * dump_width + x] = xe::byte_swap(value);
+        }
+      }
+      D3D12_RANGE dump_written = {0, 0};
+      dump_readback->Unmap(0, &dump_written);
+      std::filesystem::path dump_path = cvars::trace_dump_path;
+      dump_path += fmt::format("_gpu_{}_{:08X}.rgba", dump_draw, dump_base);
+      if (FILE* f = xe::filesystem::OpenFile(dump_path, "wb")) {
+        std::fwrite(pixels.data(), sizeof(uint32_t), pixels.size(), f);
+        std::fclose(f);
+        XELOGI("Draw probe: saved GPU texture {:08X} before draw {}",
+               dump_base, dump_draw);
+      }
+    }
+  }
+
   // Consumer VIZ draws run under SetPredication instead of blocking.
   // EQUAL_ZERO skips the draw only when the survey saw nothing.
   ID3D12Resource* predicate_buffer = nullptr;
@@ -3151,6 +3351,49 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
     PushTransitionBarrier(predicate_buffer, viz_predicate_buffer_state_,
                           D3D12_RESOURCE_STATE_PREDICATION);
     viz_predicate_buffer_state_ = D3D12_RESOURCE_STATE_PREDICATION;
+  }
+
+  // Debugging: pipeline statistics and depth before / after listed draws.
+  bool debug_stats_draw =
+      cvars::d3d12_debug_depth_probe &&
+      !cvars::d3d12_debug_depth_probe_draws.empty() &&
+      render_target_cache_->GetPath() ==
+          RenderTargetCache::Path::kHostRenderTargets &&
+      IsDebugProbeDraw(debug_probe_draw_index_);
+  static ID3D12QueryHeap* debug_stats_heap = nullptr;
+  static ID3D12Resource* debug_stats_readback = nullptr;
+  if (debug_stats_draw) {
+    ID3D12Device* device = GetD3D12Provider().GetDevice();
+    if (!debug_stats_heap) {
+      D3D12_QUERY_HEAP_DESC heap_desc = {};
+      heap_desc.Type = D3D12_QUERY_HEAP_TYPE_PIPELINE_STATISTICS;
+      heap_desc.Count = 1;
+      if (FAILED(device->CreateQueryHeap(&heap_desc,
+                                         IID_PPV_ARGS(&debug_stats_heap)))) {
+        debug_stats_heap = nullptr;
+      }
+      D3D12_RESOURCE_DESC buffer_desc;
+      ui::d3d12::util::FillBufferResourceDesc(
+          buffer_desc, sizeof(D3D12_QUERY_DATA_PIPELINE_STATISTICS),
+          D3D12_RESOURCE_FLAG_NONE);
+      if (FAILED(device->CreateCommittedResource(
+              &ui::d3d12::util::kHeapPropertiesReadback, D3D12_HEAP_FLAG_NONE,
+              &buffer_desc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
+              IID_PPV_ARGS(&debug_stats_readback)))) {
+        debug_stats_readback = nullptr;
+      }
+    }
+    XELOGI("Draw probe {}: predicated {}, pipeline {:p}, root signature {:p}",
+           debug_probe_draw_index_, predicate_buffer != nullptr,
+           static_cast<void*>(current_external_pipeline_
+                                  ? nullptr
+                                  : current_guest_pipeline_),
+           static_cast<void*>(current_graphics_root_signature_));
+    render_target_cache_->DebugCopyBoundDepth(0);
+    if (debug_stats_heap) {
+      deferred_command_list_.D3DBeginQuery(
+          debug_stats_heap, D3D12_QUERY_TYPE_PIPELINE_STATISTICS, 0);
+    }
   }
 
   // Draw.
@@ -3251,6 +3494,41 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
       ReleaseScratchGPUBuffer(scratch_index_buffer,
                               D3D12_RESOURCE_STATE_INDEX_BUFFER);
     }
+  }
+
+  if (debug_stats_draw) {
+    if (debug_stats_heap) {
+      deferred_command_list_.D3DEndQuery(
+          debug_stats_heap, D3D12_QUERY_TYPE_PIPELINE_STATISTICS, 0);
+      if (debug_stats_readback) {
+        deferred_command_list_.D3DResolveQueryData(
+            debug_stats_heap, D3D12_QUERY_TYPE_PIPELINE_STATISTICS, 0, 1,
+            debug_stats_readback, 0);
+      }
+    }
+    render_target_cache_->DebugCopyBoundDepth(1);
+    if (AwaitAllQueueOperationsCompletion()) {
+      if (debug_stats_readback) {
+        D3D12_RANGE stats_range = {
+            0, sizeof(D3D12_QUERY_DATA_PIPELINE_STATISTICS)};
+        void* stats_mapping;
+        if (SUCCEEDED(debug_stats_readback->Map(0, &stats_range,
+                                                &stats_mapping))) {
+          D3D12_QUERY_DATA_PIPELINE_STATISTICS stats;
+          std::memcpy(&stats, stats_mapping, sizeof(stats));
+          D3D12_RANGE stats_written = {0, 0};
+          debug_stats_readback->Unmap(0, &stats_written);
+          XELOGI(
+              "Draw stats {}: IA verts {} prims {}, VS {}, clip in {} out {}, "
+              "PS {}",
+              debug_probe_draw_index_, stats.IAVertices, stats.IAPrimitives,
+              stats.VSInvocations, stats.CInvocations, stats.CPrimitives,
+              stats.PSInvocations);
+        }
+      }
+      render_target_cache_->DebugLogBoundDepthCopies(debug_probe_draw_index_);
+    }
+    render_target_cache_->DebugProbeCurrentDepth(debug_probe_draw_index_);
   }
 
   if (memexport_used) {
@@ -3640,6 +3918,17 @@ bool D3D12CommandProcessor::IssueCopy_ReadbackResolvePath() {
       // chrispy: this memcpy needs to be optimized as much as possible
       auto physaddr = memory_->TranslatePhysical(written_address);
       memory::vastcpy(physaddr, (uint8_t*)readback_mapping, readback_length);
+      if (cvars::d3d12_debug_depth_probe) {
+        const uint32_t* words =
+            reinterpret_cast<const uint32_t*>(readback_mapping);
+        uint32_t nonzero = 0;
+        for (uint32_t i = 0; i < readback_length / 4; ++i) {
+          nonzero += words[i] ? 1 : 0;
+        }
+        XELOGI("Readback probe: after draw {} {:08X}+{:X}: {} non-zero dwords",
+               debug_probe_draw_index_, written_address, readback_length,
+               nonzero);
+      }
       D3D12_RANGE readback_write_range = {};
       read_source->Unmap(0, &readback_write_range);
     }

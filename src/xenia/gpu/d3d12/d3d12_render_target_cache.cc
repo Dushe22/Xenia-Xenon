@@ -33,6 +33,49 @@
 #include "xenia/ui/d3d12/d3d12_util.h"
 
 DEFINE_bool(
+    d3d12_debug_depth_probe, false,
+    "Debugging: on every depth resolve, read the host depth buffer (1x "
+    "MSAA only) and the EDRAM buffer after the dump back to the CPU and "
+    "log how many values are non-zero. Very slow, for trace replays.",
+    "D3D12");
+DEFINE_bool(
+    d3d12_split_submission_after_depth_transfers, false,
+    "Submit the command list after copying data into a depth buffer for a "
+    "render target layout change, before drawing to it. Works around depth "
+    "written after such copies being lost on some drivers.",
+    "D3D12");
+DEFINE_bool(
+    d3d12_transfer_skip_stencil_clear, false,
+    "Debugging: skip clearing stencil before render target ownership "
+    "transfers to depth buffers.",
+    "D3D12");
+DEFINE_bool(d3d12_debug_depth_probe_dump, true,
+            "Debugging: with d3d12_debug_depth_probe, also read back the "
+            "EDRAM buffer after each depth dump.",
+            "D3D12");
+DEFINE_double(
+    d3d12_debug_transfer_depth_constant, 0.0,
+    "Debugging: if positive, render target ownership transfers to depth "
+    "write this constant depth instead of the copied value.",
+    "D3D12");
+DEFINE_bool(
+    d3d12_transfer_source_all_shader_resource, false,
+    "Put render target ownership transfer sources in the pixel and "
+    "non-pixel shader resource state instead of only the pixel one (some "
+    "drivers may need it to decompress depth for pixel shader reads).",
+    "D3D12");
+DEFINE_bool(
+    d3d12_depth_dump_with_depth_read, false,
+    "Keep depth buffers in the DEPTH_READ state too while copying them for "
+    "resolves (some drivers may need it to decompress depth before reading).",
+    "D3D12");
+DEFINE_bool(
+    d3d12_float24_depth_as_unorm24, false,
+    "Store 24-bit floating-point guest depth (D24FS8) in a D24_UNORM_S8 host "
+    "depth buffer instead of D32_FLOAT_S8X24. Less precise, but works around "
+    "hosts where reading D32_FLOAT_S8X24 back gives zeros.",
+    "D3D12");
+DEFINE_bool(
     native_stencil_value_output_d3d12_intel, false,
     "Allow stencil reference output usage on Direct3D 12 on Intel GPUs - not "
     "working on UHD Graphics 630 as of March 2021 (driver 27.20.0100.8336).",
@@ -521,6 +564,8 @@ bool D3D12RenderTargetCache::Initialize() {
           break;
         }
       }
+      XELOGI("D3D12 render targets: native 2x MSAA {}",
+             msaa_2x_supported_ ? "supported" : "emulated with 4x");
       if (msaa_2x_supported_ && gamma_render_target_as_unorm16_) {
         multisample_quality_levels.Format = DXGI_FORMAT_R16G16B16A16_UNORM;
         multisample_quality_levels.NumQualityLevels = 0;
@@ -1242,6 +1287,13 @@ bool D3D12RenderTargetCache::Update(
       PerformTransfersAndResolveClears(1 + xenos::kMaxColorRenderTargets,
                                        depth_and_color_render_targets,
                                        last_update_transfers());
+      if (cvars::d3d12_split_submission_after_depth_transfers &&
+          depth_and_color_render_targets[0] &&
+          !last_update_transfers()[0].empty()) {
+        command_processor_.EndSubmission(false);
+        command_processor_.BeginSubmission(true);
+        InvalidateCommandListRenderTargets();
+      }
       SetCommandListRenderTargets(depth_and_color_render_targets);
     } break;
     case Path::kPixelShaderInterlock: {
@@ -1422,6 +1474,15 @@ bool D3D12RenderTargetCache::Resolve(const Memory& memory,
       // range to edram_buffer_.
       // TODO(Triang3l): Direct host render target -> shared memory resolve
       // shaders for non-converting cases.
+      if (cvars::d3d12_debug_depth_probe) {
+        XELOGI("Depth probe: resolve of {} {} to {:08X} format {}",
+               resolve_info.IsCopyingDepth() ? "depth" : "color",
+               resolve_info.IsCopyingDepth()
+                   ? resolve_info.depth_original_base
+                   : resolve_info.color_original_base,
+               resolve_info.copy_dest_base,
+               uint32_t(resolve_info.copy_dest_info.copy_dest_format));
+      }
       DumpRenderTargets(dump_base, dump_row_length_used, dump_rows, dump_pitch,
                         copy_native);
     }
@@ -1434,6 +1495,22 @@ bool D3D12RenderTargetCache::Resolve(const Memory& memory,
         copy_native ? 1 : draw_resolution_scale_y(), copy_shader_constants,
         copy_group_count_x, copy_group_count_y);
     assert_true(copy_group_count_x && copy_group_count_y);
+    if (cvars::d3d12_debug_depth_probe && resolve_info.IsCopyingDepth()) {
+      XELOGI(
+          "Resolve probe: depth to {:08X} extent {:08X}+{:X} shader {} groups "
+          "{}x{} native {} scaled {}",
+          resolve_info.copy_dest_base, resolve_info.copy_dest_extent_start,
+          resolve_info.copy_dest_extent_length, uint32_t(copy_shader),
+          copy_group_count_x, copy_group_count_y, copy_native ? 1 : 0,
+          copy_dest_scaled ? 1 : 0);
+      const uint32_t* cb =
+          reinterpret_cast<const uint32_t*>(&copy_shader_constants);
+      std::string cb_text;
+      for (size_t i = 0; i < sizeof(copy_shader_constants) / 4; ++i) {
+        cb_text += fmt::format(" {:08X}", cb[i]);
+      }
+      XELOGI("Resolve probe: constants{}", cb_text);
+    }
     if (copy_shader != draw_util::ResolveCopyShaderIndex::kUnknown) {
       const draw_util::ResolveCopyShaderInfo& copy_shader_info =
           draw_util::resolve_copy_shader_info[size_t(copy_shader)];
@@ -1501,6 +1578,38 @@ bool D3D12RenderTargetCache::Resolve(const Memory& memory,
           shared_memory.MarkUAVWritesCommitNeeded();
         }
 
+        if (cvars::d3d12_debug_depth_probe && resolve_info.IsCopyingDepth() &&
+            !copy_dest_scaled) {
+          shared_memory.MarkUAVWritesCommitNeeded();
+          uint32_t probe_size = resolve_info.copy_dest_extent_length;
+          ID3D12Resource* probe_readback =
+              command_processor_.RequestReadbackBuffer(probe_size);
+          if (probe_readback) {
+            shared_memory.UseAsCopySource();
+            command_processor_.SubmitBarriers();
+            command_list.D3DCopyBufferRegion(
+                probe_readback, 0, shared_memory.GetBuffer(),
+                resolve_info.copy_dest_extent_start, probe_size);
+            if (command_processor_.AwaitAllQueueOperationsCompletion()) {
+              D3D12_RANGE probe_range = {0, probe_size};
+              void* probe_mapping;
+              if (SUCCEEDED(probe_readback->Map(0, &probe_range,
+                                                &probe_mapping))) {
+                const uint32_t* words =
+                    reinterpret_cast<const uint32_t*>(probe_mapping);
+                uint32_t nonzero = 0;
+                for (uint32_t i = 0; i < probe_size / 4; ++i) {
+                  nonzero += words[i] ? 1 : 0;
+                }
+                XELOGI("Resolve probe: written range has {} non-zero dwords",
+                       nonzero);
+                D3D12_RANGE probe_written = {0, 0};
+                probe_readback->Unmap(0, &probe_written);
+              }
+            }
+          }
+          shared_memory.UseForWriting();
+        }
         // Invalidate textures and mark the range as scaled if needed.
         texture_cache.MarkRangeAsResolved(resolve_info.copy_dest_extent_start,
                                           resolve_info.copy_dest_extent_length,
@@ -1877,7 +1986,9 @@ DXGI_FORMAT D3D12RenderTargetCache::GetDepthResourceDXGIFormat(
     case xenos::DepthRenderTargetFormat::kD24S8:
       return DXGI_FORMAT_R24G8_TYPELESS;
     case xenos::DepthRenderTargetFormat::kD24FS8:
-      return DXGI_FORMAT_R32G8X24_TYPELESS;
+      return cvars::d3d12_float24_depth_as_unorm24
+                 ? DXGI_FORMAT_R24G8_TYPELESS
+                 : DXGI_FORMAT_R32G8X24_TYPELESS;
     default:
       assert_unhandled_case(format);
       return DXGI_FORMAT_UNKNOWN;
@@ -1890,7 +2001,9 @@ DXGI_FORMAT D3D12RenderTargetCache::GetDepthDSVDXGIFormat(
     case xenos::DepthRenderTargetFormat::kD24S8:
       return DXGI_FORMAT_D24_UNORM_S8_UINT;
     case xenos::DepthRenderTargetFormat::kD24FS8:
-      return DXGI_FORMAT_D32_FLOAT_S8X24_UINT;
+      return cvars::d3d12_float24_depth_as_unorm24
+                 ? DXGI_FORMAT_D24_UNORM_S8_UINT
+                 : DXGI_FORMAT_D32_FLOAT_S8X24_UINT;
     default:
       assert_unhandled_case(format);
       return DXGI_FORMAT_UNKNOWN;
@@ -1903,7 +2016,9 @@ DXGI_FORMAT D3D12RenderTargetCache::GetDepthSRVDepthDXGIFormat(
     case xenos::DepthRenderTargetFormat::kD24S8:
       return DXGI_FORMAT_R24_UNORM_X8_TYPELESS;
     case xenos::DepthRenderTargetFormat::kD24FS8:
-      return DXGI_FORMAT_R32_FLOAT_X8X24_TYPELESS;
+      return cvars::d3d12_float24_depth_as_unorm24
+                 ? DXGI_FORMAT_R24_UNORM_X8_TYPELESS
+                 : DXGI_FORMAT_R32_FLOAT_X8X24_TYPELESS;
     default:
       assert_unhandled_case(format);
       return DXGI_FORMAT_UNKNOWN;
@@ -1916,7 +2031,9 @@ DXGI_FORMAT D3D12RenderTargetCache::GetDepthSRVStencilDXGIFormat(
     case xenos::DepthRenderTargetFormat::kD24S8:
       return DXGI_FORMAT_X24_TYPELESS_G8_UINT;
     case xenos::DepthRenderTargetFormat::kD24FS8:
-      return DXGI_FORMAT_X32_TYPELESS_G8X24_UINT;
+      return cvars::d3d12_float24_depth_as_unorm24
+                 ? DXGI_FORMAT_X24_TYPELESS_G8_UINT
+                 : DXGI_FORMAT_X32_TYPELESS_G8X24_UINT;
     default:
       assert_unhandled_case(format);
       return DXGI_FORMAT_UNKNOWN;
@@ -4255,7 +4372,13 @@ D3D12RenderTargetCache::GetOrCreateTransferPipelines(TransferShaderKey key) {
             a.OpEndIf();
           }
         }
-        a.OpMov(dxbc::Dest::ODepth(), dxbc::Src::R(1, dxbc::Src::kWWWW));
+        if (cvars::d3d12_debug_transfer_depth_constant > 0.0) {
+          a.OpMov(dxbc::Dest::ODepth(),
+                  dxbc::Src::LF(
+                      float(cvars::d3d12_debug_transfer_depth_constant)));
+        } else {
+          a.OpMov(dxbc::Dest::ODepth(), dxbc::Src::R(1, dxbc::Src::kWWWW));
+        }
         break;
       case TransferOutput::kStencilBit:
         // Discard the sample if the needed stencil bit is not set.
@@ -4385,6 +4508,19 @@ D3D12RenderTargetCache::GetOrCreateTransferPipelines(TransferShaderKey key) {
   pipeline_desc.VS.BytecodeLength = sizeof(shaders::passthrough_position_xy_vs);
   pipeline_desc.PS.pShaderBytecode = built_shader_.data();
   pipeline_desc.PS.BytecodeLength = built_shader_size_bytes;
+  if (cvars::d3d12_debug_depth_probe) {
+    std::string dump_name = fmt::format(
+        "transfer_ps_{:08X}.dxbc", uint32_t(std::hash<std::string>()(
+                                       std::string(reinterpret_cast<const char*>(
+                                                       built_shader_.data()),
+                                                   built_shader_size_bytes))));
+    if (FILE* f = std::fopen(dump_name.c_str(), "wb")) {
+      std::fwrite(built_shader_.data(), 1, built_shader_size_bytes, f);
+      std::fclose(f);
+    }
+    XELOGI("Transfer probe: pipeline key {:08X} mode {} -> {}", key.key,
+           uint32_t(key.mode), dump_name);
+  }
   if (key.dest_msaa_samples == xenos::MsaaSamples::k2X && !msaa_2x_supported_) {
     // Using sample 0 as 0 and 3 as 1 for 2x instead.
     pipeline_desc.SampleMask = 0b1001;
@@ -4517,6 +4653,12 @@ D3D12RenderTargetCache::GetOrCreateTransferPipelines(TransferShaderKey key) {
   return pipelines;
 }
 
+static D3D12_RESOURCE_STATES TransferSourceState() {
+  return cvars::d3d12_transfer_source_all_shader_resource
+             ? D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE
+             : D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+}
+
 bool D3D12RenderTargetCache::PerformTransfersAndResolveClears(
     uint32_t render_target_count, RenderTarget* const* render_targets,
     const std::vector<Transfer>* render_target_transfers,
@@ -4559,6 +4701,26 @@ bool D3D12RenderTargetCache::PerformTransfersAndResolveClears(
     clear_rect.bottom = LONG((resolve_clear_rectangle->y_pixels +
                               resolve_clear_rectangle->height_pixels) *
                              resolve_clear_scale_y);
+  }
+
+  if (cvars::d3d12_debug_depth_probe && render_target_transfers) {
+    for (uint32_t i = 0; i < render_target_count; ++i) {
+      if (!render_targets[i]) {
+        continue;
+      }
+      for (const Transfer& transfer : render_target_transfers[i]) {
+        XELOGI(
+            "Transfer probe: draw {} to {} from {} (host depth {}), tiles {} "
+            "to {}",
+            command_processor_.debug_probe_draw_index_ + 1,
+            render_targets[i]->key().GetDebugName(),
+            transfer.source ? transfer.source->key().GetDebugName() : "none",
+            transfer.host_depth_source
+                ? transfer.host_depth_source->key().GetDebugName()
+                : "none",
+            transfer.start_tiles, transfer.end_tiles);
+      }
+    }
   }
 
   // Do host depth storing for the depth destination (assuming there can be only
@@ -4689,7 +4851,7 @@ bool D3D12RenderTargetCache::PerformTransfersAndResolveClears(
         auto& source_d3d12_rt =
             *static_cast<D3D12RenderTarget*>(transfer.source);
         TransitionRenderTarget(source_d3d12_rt,
-                               D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+                               TransferSourceState());
       }
       // transfer.host_depth_source == dest_rt means the EDRAM buffer will be
       // used instead, no need to transition.
@@ -4698,7 +4860,7 @@ bool D3D12RenderTargetCache::PerformTransfersAndResolveClears(
         auto& host_depth_source_d3d12_rt =
             *static_cast<D3D12RenderTarget*>(transfer.host_depth_source);
         TransitionRenderTarget(host_depth_source_d3d12_rt,
-                               D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+                               TransferSourceState());
       }
     }
     // Transition the destination, only if not going to be used as a source
@@ -4975,7 +5137,8 @@ bool D3D12RenderTargetCache::PerformTransfersAndResolveClears(
       // bits that need to be 1 by discarding samples. Clearing everything here
       // to reduce context switches internally in the driver if clear causes
       // them.
-      if (stencil_clear_rectangle_count) {
+      if (stencil_clear_rectangle_count &&
+          !cvars::d3d12_transfer_skip_stencil_clear) {
         // No need to update sample positions here. Sample clears ignore them.
         command_processor_.SubmitBarriers();
         D3D12_RECT* stencil_clear_rect_write_ptr =
@@ -5081,7 +5244,7 @@ bool D3D12RenderTargetCache::PerformTransfersAndResolveClears(
         // Late barriers in case there was cross-copying that prevented merging
         // of barriers.
         TransitionRenderTarget(source_d3d12_rt,
-                               D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+                               TransferSourceState());
         if (host_depth_source_d3d12_rt) {
           if (transfer_shader_key.host_depth_source_is_copy) {
             // Reading copied host depth from the EDRAM buffer.
@@ -5089,7 +5252,7 @@ bool D3D12RenderTargetCache::PerformTransfersAndResolveClears(
           } else {
             // Reading host depth from the texture.
             TransitionRenderTarget(*host_depth_source_d3d12_rt,
-                                   D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+                                   TransferSourceState());
           }
         }
 
@@ -6547,8 +6710,12 @@ void D3D12RenderTargetCache::DumpRenderTargets(uint32_t dump_base,
   uint32_t rt_sort_index = 0;
   for (const ResolveCopyDumpRectangle& rectangle : dump_rectangles_) {
     auto& d3d12_rt = *static_cast<D3D12RenderTarget*>(rectangle.render_target);
-    TransitionRenderTarget(d3d12_rt,
-                           D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    TransitionRenderTarget(
+        d3d12_rt,
+        (d3d12_rt.key().is_depth && cvars::d3d12_depth_dump_with_depth_read)
+            ? D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE |
+                  D3D12_RESOURCE_STATE_DEPTH_READ
+            : D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
     if (d3d12_rt.temporary_sort_index() == UINT32_MAX) {
       d3d12_rt.SetTemporarySortIndex(rt_sort_index++);
     }
@@ -6724,6 +6891,322 @@ void D3D12RenderTargetCache::DumpRenderTargets(uint32_t dump_base,
     }
     MarkEdramBufferModified();
   }
+  if (cvars::d3d12_debug_depth_probe && cvars::d3d12_debug_depth_probe_dump) {
+    DebugProbeDepthDump(dump_base, dump_row_length_used, dump_rows,
+                        dump_pitch, native_layout);
+  }
+}
+
+namespace {
+constexpr uint32_t kDebugDepthCopySlots = 2;
+ID3D12Resource* debug_depth_copy_readback = nullptr;
+uint64_t debug_depth_copy_slot_size = 0;
+D3D12_PLACED_SUBRESOURCE_FOOTPRINT
+    debug_depth_copy_footprints[kDebugDepthCopySlots];
+UINT debug_depth_copy_rows[kDebugDepthCopySlots];
+bool debug_depth_copy_valid[kDebugDepthCopySlots];
+}  // namespace
+
+void D3D12RenderTargetCache::DebugCopyBoundDepth(uint32_t slot) {
+  if (slot >= kDebugDepthCopySlots) {
+    return;
+  }
+  debug_depth_copy_valid[slot] = false;
+  auto* depth_rt = static_cast<D3D12RenderTarget*>(
+      last_update_accumulated_render_targets()[0]);
+  if (!depth_rt || depth_rt->key().msaa_samples != xenos::MsaaSamples::k1X) {
+    XELOGI("Depth copy {}: no 1x depth buffer bound", slot);
+    return;
+  }
+  ID3D12Device* device = command_processor_.GetD3D12Provider().GetDevice();
+  D3D12_RESOURCE_DESC rt_desc = depth_rt->resource()->GetDesc();
+  UINT64 row_size, copy_total;
+  device->GetCopyableFootprints(&rt_desc, 0, 1, 0,
+                                &debug_depth_copy_footprints[slot],
+                                &debug_depth_copy_rows[slot], &row_size,
+                                &copy_total);
+  uint64_t slot_size = xe::align(
+      copy_total, uint64_t(D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT));
+  if (slot_size > debug_depth_copy_slot_size) {
+    if (debug_depth_copy_readback) {
+      // Leaked on purpose if still in use; this is a debug path.
+      debug_depth_copy_readback = nullptr;
+    }
+    D3D12_RESOURCE_DESC buffer_desc;
+    ui::d3d12::util::FillBufferResourceDesc(
+        buffer_desc, slot_size * kDebugDepthCopySlots,
+        D3D12_RESOURCE_FLAG_NONE);
+    if (FAILED(device->CreateCommittedResource(
+            &ui::d3d12::util::kHeapPropertiesReadback, D3D12_HEAP_FLAG_NONE,
+            &buffer_desc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
+            IID_PPV_ARGS(&debug_depth_copy_readback)))) {
+      XELOGE("Depth copy: failed to create the readback buffer");
+      debug_depth_copy_readback = nullptr;
+      debug_depth_copy_slot_size = 0;
+      return;
+    }
+    debug_depth_copy_slot_size = slot_size;
+  }
+  debug_depth_copy_footprints[slot].Offset = debug_depth_copy_slot_size * slot;
+  D3D12_RESOURCE_STATES old_state = depth_rt->SetResourceState(
+      D3D12_RESOURCE_STATE_DEPTH_WRITE);
+  depth_rt->SetResourceState(old_state);
+  TransitionRenderTarget(*depth_rt, D3D12_RESOURCE_STATE_COPY_SOURCE);
+  command_processor_.SubmitBarriers();
+  D3D12_TEXTURE_COPY_LOCATION dst, src;
+  dst.pResource = debug_depth_copy_readback;
+  dst.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+  dst.PlacedFootprint = debug_depth_copy_footprints[slot];
+  src.pResource = depth_rt->resource();
+  src.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+  src.SubresourceIndex = 0;
+  command_processor_.GetDeferredCommandList().CopyTexture(dst, src);
+  TransitionRenderTarget(*depth_rt, old_state);
+  command_processor_.SubmitBarriers();
+  debug_depth_copy_valid[slot] = true;
+  XELOGI("Depth copy {}: {} (state {:X} kept)", slot,
+         depth_rt->key().GetDebugName(), uint32_t(old_state));
+}
+
+void D3D12RenderTargetCache::DebugLogBoundDepthCopies(uint32_t draw_index) {
+  if (!debug_depth_copy_readback) {
+    return;
+  }
+  D3D12_RANGE read_range = {
+      0, SIZE_T(debug_depth_copy_slot_size * kDebugDepthCopySlots)};
+  void* mapping;
+  if (FAILED(debug_depth_copy_readback->Map(0, &read_range, &mapping))) {
+    return;
+  }
+  const uint8_t* bytes = static_cast<const uint8_t*>(mapping);
+  for (uint32_t slot = 0; slot < kDebugDepthCopySlots; ++slot) {
+    if (!debug_depth_copy_valid[slot]) {
+      continue;
+    }
+    const D3D12_PLACED_SUBRESOURCE_FOOTPRINT& fp =
+        debug_depth_copy_footprints[slot];
+    uint64_t values = 0, nonzero = 0;
+    uint32_t first = 0, max_value = 0;
+    for (UINT y = 0; y < debug_depth_copy_rows[slot]; ++y) {
+      const uint32_t* row = reinterpret_cast<const uint32_t*>(
+          bytes + fp.Offset + uint64_t(y) * fp.Footprint.RowPitch);
+      for (UINT x = 0; x < fp.Footprint.Width; ++x) {
+        ++values;
+        if (row[x]) {
+          ++nonzero;
+          if (!first) {
+            first = row[x];
+          }
+          max_value = std::max(max_value, row[x]);
+        }
+      }
+    }
+    XELOGI("Depth copy draw {} {}: {} of {} non-zero, first {:08X}, max "
+           "{:08X}",
+           draw_index, slot ? "after" : "before", nonzero, values, first,
+           max_value);
+    debug_depth_copy_valid[slot] = false;
+  }
+  D3D12_RANGE written_range = {0, 0};
+  debug_depth_copy_readback->Unmap(0, &written_range);
+}
+
+void D3D12RenderTargetCache::DebugProbeCurrentDepth(uint32_t draw_index) {
+  RenderTarget* depth_rt = last_update_accumulated_render_targets()[0];
+  if (!depth_rt) {
+    XELOGI("Depth probe after draw {}: no depth buffer bound", draw_index);
+    return;
+  }
+  RenderTargetKey key = depth_rt->key();
+  uint32_t pitch = key.GetPitchTiles();
+  uint32_t rows_per_tile =
+      key.msaa_samples >= xenos::MsaaSamples::k2X ? 8 : 16;
+  uint32_t rows = (depth_rt->height() + rows_per_tile - 1) / rows_per_tile;
+  XELOGI("Depth probe after draw {}: {} height {}", draw_index,
+         key.GetDebugName(), depth_rt->height());
+  DumpRenderTargets(key.base_tiles, pitch, rows, pitch, false);
+  if (!cvars::d3d12_debug_depth_probe) {
+    return;
+  }
+  InvalidateCommandListRenderTargets();
+}
+
+void D3D12RenderTargetCache::DebugProbeDepthDump(uint32_t dump_base,
+                                                 uint32_t dump_row_length_used,
+                                                 uint32_t dump_rows,
+                                                 uint32_t dump_pitch,
+                                                 bool native_layout) {
+  bool any_depth = false;
+  for (const DumpInvocation& invocation : dump_invocations_) {
+    if (invocation.pipeline_key.is_depth) {
+      any_depth = true;
+    }
+  }
+  if (!any_depth) {
+    return;
+  }
+  ID3D12Device* device = command_processor_.GetD3D12Provider().GetDevice();
+  DeferredCommandList& command_list =
+      command_processor_.GetDeferredCommandList();
+
+  // Readback buffer layout: the EDRAM buffer, then the host depth copies.
+  D3D12_RESOURCE_DESC edram_desc = edram_buffer_->GetDesc();
+  uint64_t edram_size = edram_desc.Width;
+  struct HostCopy {
+    D3D12RenderTarget* rt;
+    D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint;
+    UINT rows;
+    UINT64 row_size;
+  };
+  std::vector<HostCopy> host_copies;
+  uint64_t total_size = edram_size;
+  for (const DumpInvocation& invocation : dump_invocations_) {
+    auto& d3d12_rt =
+        *static_cast<D3D12RenderTarget*>(invocation.rectangle.render_target);
+    RenderTargetKey key = d3d12_rt.key();
+    XELOGI("Depth probe: dump {} to tiles {} (rows {}, length {}, pitch {}){}",
+           key.GetDebugName(), dump_base, dump_rows, dump_row_length_used,
+           dump_pitch, native_layout ? " native layout" : "");
+    if (!key.is_depth || key.msaa_samples != xenos::MsaaSamples::k1X) {
+      continue;
+    }
+    bool seen = false;
+    for (const HostCopy& copy : host_copies) {
+      seen |= copy.rt == &d3d12_rt;
+    }
+    if (seen) {
+      continue;
+    }
+    HostCopy copy;
+    copy.rt = &d3d12_rt;
+    D3D12_RESOURCE_DESC rt_desc = d3d12_rt.resource()->GetDesc();
+    UINT64 copy_total;
+    device->GetCopyableFootprints(
+        &rt_desc, 0, 1,
+        xe::align(total_size,
+                  uint64_t(D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT)),
+        &copy.footprint, &copy.rows, &copy.row_size, &copy_total);
+    total_size = copy.footprint.Offset + copy_total;
+    host_copies.push_back(copy);
+  }
+
+  // Leaked on purpose (debug only), releasing at exit after the device crashes.
+  static ID3D12Resource* readback = nullptr;
+  static uint64_t readback_size = 0;
+  if (total_size > readback_size) {
+    if (readback) {
+      readback->Release();
+      readback = nullptr;
+    }
+    D3D12_RESOURCE_DESC buffer_desc;
+    ui::d3d12::util::FillBufferResourceDesc(buffer_desc, total_size,
+                                            D3D12_RESOURCE_FLAG_NONE);
+    if (FAILED(device->CreateCommittedResource(
+            &ui::d3d12::util::kHeapPropertiesReadback, D3D12_HEAP_FLAG_NONE,
+            &buffer_desc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
+            IID_PPV_ARGS(&readback)))) {
+      readback_size = 0;
+      XELOGE("Depth probe: failed to create the readback buffer");
+      return;
+    }
+    readback_size = total_size;
+  }
+
+  TransitionEdramBuffer(D3D12_RESOURCE_STATE_COPY_SOURCE);
+  for (const HostCopy& copy : host_copies) {
+    TransitionRenderTarget(*copy.rt, D3D12_RESOURCE_STATE_COPY_SOURCE);
+  }
+  command_processor_.SubmitBarriers();
+  command_list.D3DCopyBufferRegion(readback, 0, edram_buffer_, 0,
+                                   edram_size);
+  for (const HostCopy& copy : host_copies) {
+    D3D12_TEXTURE_COPY_LOCATION dst, src;
+    dst.pResource = readback;
+    dst.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+    dst.PlacedFootprint = copy.footprint;
+    src.pResource = copy.rt->resource();
+    src.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    src.SubresourceIndex = 0;
+    command_list.CopyTexture(dst, src);
+  }
+  if (!command_processor_.AwaitAllQueueOperationsCompletion()) {
+    XELOGE("Depth probe: failed to await the GPU");
+    return;
+  }
+  D3D12_RANGE read_range = {0, SIZE_T(total_size)};
+  void* mapping;
+  if (FAILED(readback->Map(0, &read_range, &mapping))) {
+    XELOGE("Depth probe: failed to map the readback buffer");
+    return;
+  }
+  const uint8_t* bytes = static_cast<const uint8_t*>(mapping);
+
+  // EDRAM tiles of the dumped range.
+  const uint32_t tile_size = xenos::kEdramTileWidthSamples *
+                             xenos::kEdramTileHeightSamples *
+                             sizeof(uint32_t) * draw_resolution_scale_x() *
+                             draw_resolution_scale_y();
+  uint64_t edram_values = 0, edram_nonzero = 0, edram_depth_nonzero = 0;
+  uint32_t edram_sample = 0;
+  uint32_t range_length =
+      dump_rows ? (dump_rows - 1) * dump_pitch + dump_row_length_used : 0;
+  for (uint32_t i = 0; i < range_length; ++i) {
+    uint32_t tile = (dump_base + i) % edram_tile_count();
+    if (uint64_t(tile + 1) * tile_size > edram_size) {
+      continue;
+    }
+    const uint32_t* values = reinterpret_cast<const uint32_t*>(
+        bytes + uint64_t(tile) * tile_size);
+    for (uint32_t j = 0; j < tile_size / sizeof(uint32_t); ++j) {
+      ++edram_values;
+      if (values[j]) {
+        ++edram_nonzero;
+        if (!edram_sample) {
+          edram_sample = values[j];
+        }
+      }
+      // Guest depth is in the upper 24 bits.
+      if (values[j] >> 8) {
+        ++edram_depth_nonzero;
+      }
+    }
+  }
+  XELOGI(
+      "Depth probe: EDRAM after dump: {} of {} values non-zero, {} with "
+      "non-zero depth, first non-zero {:08X}",
+      edram_nonzero, edram_values, edram_depth_nonzero, edram_sample);
+
+  for (const HostCopy& copy : host_copies) {
+    uint64_t values = 0, nonzero = 0;
+    uint32_t sample = 0, min_value = UINT32_MAX, max_value = 0;
+    // The depth planes used here are 32 bits per texel.
+    for (UINT y = 0; y < copy.rows; ++y) {
+      const uint32_t* row = reinterpret_cast<const uint32_t*>(
+          bytes + copy.footprint.Offset +
+          uint64_t(y) * copy.footprint.Footprint.RowPitch);
+      for (UINT x = 0; x < copy.footprint.Footprint.Width; ++x) {
+        uint32_t value = row[x];
+        ++values;
+        min_value = std::min(min_value, value);
+        max_value = std::max(max_value, value);
+        if (value) {
+          ++nonzero;
+          if (!sample) {
+            sample = value;
+          }
+        }
+      }
+    }
+    XELOGI(
+        "Depth probe: host {} format {} ({}x{}): {} of {} non-zero, first "
+        "{:08X}, min {:08X}, max {:08X}",
+        copy.rt->key().GetDebugName(),
+        uint32_t(copy.footprint.Footprint.Format),
+        copy.footprint.Footprint.Width, copy.rows, nonzero, values, sample,
+        min_value, max_value);
+  }
+  D3D12_RANGE written_range = {0, 0};
+  readback->Unmap(0, &written_range);
 }
 
 }  // namespace d3d12

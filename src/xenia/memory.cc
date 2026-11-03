@@ -1231,7 +1231,9 @@ bool BaseHeap::AllocRange(uint32_t low_address, uint32_t high_address,
       std::min(uint32_t(page_table_.size()) - 1, high_page_number);
 
   if (page_count > (high_page_number - low_page_number)) {
-    XELOGE("BaseHeap::Alloc page count too big for requested range");
+    if (ShouldLogAllocFailure()) {
+      XELOGE("BaseHeap::Alloc page count too big for requested range");
+    }
     return false;
   }
 
@@ -1324,7 +1326,9 @@ bool BaseHeap::AllocRange(uint32_t low_address, uint32_t high_address,
 
   if (start_page_number == UINT_MAX || end_page_number == UINT_MAX) {
     // Out of memory.
-    XELOGE("BaseHeap::Alloc failed to find contiguous range");
+    if (ShouldLogAllocFailure()) {
+      XELOGE("BaseHeap::Alloc failed to find contiguous range");
+    }
     // assert_always("Heap exhausted!");
     return false;
   }
@@ -1938,11 +1942,40 @@ bool PhysicalHeap::AllocRange(uint32_t low_address, uint32_t high_address,
   if (!parent_heap_->AllocRange(parent_low_address, parent_high_address, size,
                                 alignment, allocation_type, protect, top_down,
                                 &parent_address)) {
-    XELOGE(
-        "PhysicalHeap::AllocRange unable to alloc physical memory in parent "
-        "heap (requested {} bytes, parent free {}/{} pages)",
-        size, parent_heap_->unreserved_page_count(),
-        parent_heap_->total_page_count());
+    if (ShouldLogAllocFailure()) {
+      XELOGE(
+          "PhysicalHeap::AllocRange unable to alloc physical memory in parent "
+          "heap (requested {} bytes, parent free {}/{} pages)",
+          size, parent_heap_->unreserved_page_count(),
+          parent_heap_->total_page_count());
+    }
+    // Xenon diagnostics: show what occupies a restricted physical window for
+    // the first few failures, to find who blocks fixed-range requests.
+    static uint32_t range_dumps_left = 4;
+    if (range_dumps_left &&
+        parent_high_address - parent_low_address < 0x04000000) {
+      --range_dumps_left;
+      XELOGE("  Physical window {:08X}-{:08X} (size {:08X} align {:08X}):",
+             parent_low_address, parent_high_address, size, alignment);
+      uint32_t cursor = parent_low_address;
+      uint32_t lines = 0;
+      while (cursor < parent_high_address && lines < 48) {
+        HeapAllocationInfo info;
+        if (!parent_heap_->QueryRegionInfo(cursor, &info) ||
+            !info.region_size) {
+          break;
+        }
+        XELOGE("    {:08X}-{:08X} {} alloc base {:08X} size {:08X} prot {:X}",
+               info.base_address, info.base_address + info.region_size,
+               (info.state & kMemoryAllocationCommit)    ? "COM"
+               : (info.state & kMemoryAllocationReserve) ? "RES"
+                                                         : "free",
+               info.allocation_base, info.allocation_size,
+               info.allocation_protect);
+        cursor = info.base_address + info.region_size;
+        ++lines;
+      }
+    }
     return false;
   }
   // Given the address we've reserved in the parent heap, pin that here.

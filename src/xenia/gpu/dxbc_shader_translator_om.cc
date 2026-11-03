@@ -24,6 +24,11 @@ DEFINE_bool(use_fuzzy_alpha_epsilon, false,
             "NVIDIA graphics cards",
             "GPU");
 
+DEFINE_double(d3d12_debug_shader_depth_constant, 0.0,
+              "Debugging: guest shaders that write depth output this "
+              "constant instead.",
+              "D3D12");
+
 namespace xe {
 namespace gpu {
 using namespace ucode;
@@ -2064,8 +2069,13 @@ void DxbcShaderTranslator::CompletePixelShader_DSV_DepthTo24Bit() {
                dxbc::Src::LF(0.5f));
       a_.OpEndIf();
       // Write the depth from the temporary to the system depth output.
-      a_.OpMov(dxbc::Dest::ODepth(),
-               dxbc::Src::R(system_temp_depth_stencil_, dxbc::Src::kXXXX));
+      if (cvars::d3d12_debug_shader_depth_constant > 0.0) {
+        a_.OpMov(dxbc::Dest::ODepth(),
+                 dxbc::Src::LF(float(cvars::d3d12_debug_shader_depth_constant)));
+      } else {
+        a_.OpMov(dxbc::Dest::ODepth(),
+                 dxbc::Src::R(system_temp_depth_stencil_, dxbc::Src::kXXXX));
+      }
     } else if (apply_polygon_offset) {
       // Some decal draws use bias values too small for host RT depth bias to
       // stay stable. Writing the biased depth here keeps those redraws stable
@@ -2229,7 +2239,8 @@ void DxbcShaderTranslator::CompletePixelShader_AlphaToMask(
     uint32_t zpd_coverage_temp) {
   // Check if alpha to coverage can be done at all in this shader.
   if (!current_shader().writes_color_target(0) ||
-      IsForceEarlyDepthStencilGlobalFlagEnabled()) {
+      IsForceEarlyDepthStencilGlobalFlagEnabled() ||
+      IsCoverageOutputSkippedForDepth()) {
     return;
   }
 

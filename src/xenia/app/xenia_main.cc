@@ -58,6 +58,7 @@
 #endif  // !XE_PLATFORM_WINRT
 #if XE_PLATFORM_WIN32
 #include "xenia/gpu/d3d12/d3d12_graphics_system.h"
+#include "xenia/gpu/trace_dump.h"
 #endif  // XE_PLATFORM_WIN32
 
 // Available input drivers:
@@ -146,8 +147,60 @@ DEFINE_bool(discord, true, "Enable Discord rich presence", "General");
 DECLARE_int32(window_size_x);
 DECLARE_int32(window_size_y);
 
+DECLARE_path(target_trace_file);
+DECLARE_path(trace_dump_path);
+
 namespace xe {
 namespace app {
+
+#if XE_PLATFORM_WIN32
+namespace {
+
+// Replays a GPU trace (.xtr) with D3D12 and saves the final frame as a PNG.
+class D3D12TraceReplay : public gpu::TraceDump {
+ public:
+  std::unique_ptr<gpu::GraphicsSystem> CreateGraphicsSystem() override {
+    return std::make_unique<gpu::d3d12::D3D12GraphicsSystem>();
+  }
+  void BeginHostCapture() override {}
+  void EndHostCapture() override {}
+};
+
+// Developer tool: if <storage root>/trace_replay.toml exists, it is applied as
+// a config overlay, the trace in [GPU.Debug] target_trace_file is replayed,
+// and the app exits. Relative paths are resolved against the storage root.
+// The request is renamed first, so a crash can't make every launch replay.
+bool RunTraceReplayRequest(const std::filesystem::path& storage_root) {
+  const std::filesystem::path request = storage_root / "trace_replay.toml";
+  std::error_code ec;
+  if (!std::filesystem::exists(request, ec)) {
+    return false;
+  }
+  const std::filesystem::path taken = storage_root / "trace_replay.last.toml";
+  std::filesystem::remove(taken, ec);
+  std::filesystem::rename(request, taken, ec);
+  config::ReadGameConfig(taken);
+
+  if (cvars::target_trace_file.is_relative()) {
+    cvars::target_trace_file = storage_root / cvars::target_trace_file;
+  }
+  if (cvars::trace_dump_path.empty()) {
+    cvars::trace_dump_path = storage_root / "traces" / "replay";
+  } else if (cvars::trace_dump_path.is_relative()) {
+    cvars::trace_dump_path = storage_root / cvars::trace_dump_path;
+  }
+  std::filesystem::create_directories(cvars::trace_dump_path, ec);
+
+  XELOGI("Trace replay: {} -> {}", cvars::target_trace_file,
+         cvars::trace_dump_path);
+  D3D12TraceReplay replay;
+  const int result = replay.Main({});
+  XELOGI("Trace replay finished: {}", result);
+  return true;
+}
+
+}  // namespace
+#endif  // XE_PLATFORM_WIN32
 
 class EmulatorApp final : public xe::ui::WindowedApp {
  public:
@@ -515,6 +568,13 @@ bool EmulatorApp::OnInitialize() {
   XELOGI("Storage root: {}", storage_root);
 
   config::SetupConfig(storage_root);
+
+#if XE_PLATFORM_WIN32
+  if (RunTraceReplayRequest(storage_root)) {
+    xe::FlushLog();
+    TerminateProcess(GetCurrentProcess(), 0);
+  }
+#endif
 
 #if XE_ARCH_AMD64 == 1
   amd64::InitFeatureFlags();

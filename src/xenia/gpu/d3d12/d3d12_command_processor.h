@@ -59,6 +59,10 @@ struct MemExportRange {
   uint32_t size_dwords;
 };
 class D3D12CommandProcessor final : public CommandProcessor {
+  // For the debug depth probe readbacks.
+  friend class D3D12RenderTargetCache;
+  uint32_t debug_probe_draw_index_ = UINT32_MAX;
+
  protected:
 #define OVERRIDING_BASE_CMDPROCESSOR
 #include "../pm4_command_processor_declare.h"

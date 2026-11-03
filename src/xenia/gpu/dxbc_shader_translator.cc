@@ -23,6 +23,14 @@
 
 // The test case for AMD is 4D5307E6 (checked in 2018).
 // Should be false for WinRt/Xbox, fixes most games.
+DEFINE_bool(
+    d3d12_shader_depth_fix, true,
+    "Don't output SV_Coverage (alpha to coverage) from pixel shaders that "
+    "write depth. The Xbox (AMD) driver drops the shader depth output when "
+    "both are written, so depth restore draws write the interpolated depth "
+    "instead, making characters see-through (WWE 13). Alpha to coverage is "
+    "lost only in shaders that also write depth. Needs a game restart.",
+    "D3D12");
 DEFINE_bool(dxbc_switch, false,
             "Use switch rather than if for flow control. Turning this off or "
             "on may improve stability, though this heavily depends on the "
@@ -40,6 +48,11 @@ DEFINE_bool(dxbc_source_map, false,
 namespace xe {
 namespace gpu {
 using namespace ucode;
+
+bool DxbcShaderTranslator::IsCoverageOutputSkippedForDepth() const {
+  return cvars::d3d12_shader_depth_fix && !edram_rov_used_ &&
+         is_pixel_shader() && current_shader().writes_depth();
+}
 
 // Notes about operands:
 //
@@ -3343,7 +3356,8 @@ void DxbcShaderTranslator::WriteOutputSignature() {
       // Coverage output for alpha to mask (SV_Coverage).
       size_t coverage_position = SIZE_MAX;
       if ((color_targets_written & 0b1) &&
-          !IsForceEarlyDepthStencilGlobalFlagEnabled()) {
+          !IsForceEarlyDepthStencilGlobalFlagEnabled() &&
+          !IsCoverageOutputSkippedForDepth()) {
         coverage_position = shader_object_.size();
         shader_object_.resize(shader_object_.size() + kParameterDwords);
         ++parameter_count;
@@ -3769,7 +3783,8 @@ void DxbcShaderTranslator::WriteShaderCode() {
       }
       // Coverage output for alpha to mask.
       if ((color_targets_written & 0b1) &&
-          !global_flag_force_early_depth_stencil) {
+          !global_flag_force_early_depth_stencil &&
+          !IsCoverageOutputSkippedForDepth()) {
         ao_.OpDclOutput(dxbc::Dest::OMask());
       }
       // Depth output.
