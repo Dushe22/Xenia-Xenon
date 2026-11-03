@@ -216,7 +216,22 @@ void UWP::UpdateImGuiIO() {
     return;
   }
 
-  const uint16_t buttons = state.gamepad.buttons;
+  // Debounce: a button counts as released only after it stays up for a
+  // moment. Single misread polls made held buttons look pressed again, so
+  // menus repeated actions (one A press ran Capture nine times).
+  constexpr uint64_t kReleaseDebounceMs = 60;
+  static uint64_t s_button_last_down_ms[16] = {};
+  const uint64_t poll_ms = Clock::QueryHostUptimeMillis();
+  uint16_t buttons = 0;
+  for (int bit = 0; bit < 16; ++bit) {
+    if (state.gamepad.buttons & (1u << bit)) {
+      s_button_last_down_ms[bit] = poll_ms;
+    }
+    if (s_button_last_down_ms[bit] &&
+        poll_ms - s_button_last_down_ms[bit] < kReleaseDebounceMs) {
+      buttons |= uint16_t(1u << bit);
+    }
+  }
 
   io.AddKeyEvent(ImGuiKey_GamepadFaceDown,   (buttons & X_INPUT_GAMEPAD_A) != 0);
   io.AddKeyEvent(ImGuiKey_GamepadFaceRight,  (buttons & X_INPUT_GAMEPAD_B) != 0);

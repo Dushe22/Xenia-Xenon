@@ -266,7 +266,7 @@ namespace app {
 
 // Lets the right stick scroll the current window (frontend pages).
 static xe::app::xenon_settings::State* g_xenon_active_page_state = nullptr;
-static constexpr char kXenonVersion[] = "1.2.4.6";
+static constexpr char kXenonVersion[] = "1.2.4.7";
 static bool g_xenon_pergame_on_right = false;
 
 static void XenonGamepadScroll() {
@@ -2379,6 +2379,7 @@ void EmulatorWindow::QuickMenuWatcher() {
   constexpr uint16_t kCombo = X_INPUT_GAMEPAD_BACK | X_INPUT_GAMEPAD_START;
   bool combo_was_down = false;
   bool title_was_open = false;
+  std::chrono::steady_clock::time_point last_toggle_time{};
   while (true) {
     xe::threading::Sleep(std::chrono::milliseconds(40));
     const bool title_open = emulator_->is_title_open();
@@ -2389,14 +2390,21 @@ void EmulatorWindow::QuickMenuWatcher() {
 
     auto* input = emulator_->input_system();
     X_INPUT_STATE state = {};
-    if (!input || !title_open ||
-        input->GetHostState(0, &state) != X_ERROR_SUCCESS) {
+    if (!input || !title_open) {
       combo_was_down = false;
+      continue;
+    }
+    // A failed read keeps the last state: treating it as "released" made a
+    // held Back+Start toggle the menu again and again.
+    if (input->GetHostState(0, &state) != X_ERROR_SUCCESS) {
       continue;
     }
     const uint16_t buttons = state.gamepad.buttons;
     const bool combo_down = (buttons & kCombo) == kCombo;
-    if (combo_down && !combo_was_down) {
+    const auto now = std::chrono::steady_clock::now();
+    if (combo_down && !combo_was_down &&
+        now - last_toggle_time >= std::chrono::milliseconds(500)) {
+      last_toggle_time = now;
       ToggleQuickMenu();
     }
     combo_was_down = combo_down;

@@ -823,6 +823,13 @@ inline bool Draw(State& st, const std::vector<Category>& cats, float s,
                             ImGuiKey_GamepadLStickLeft, ImGuiKey_LeftArrow);
   const bool right = Pressed(ImGuiKey_GamepadDpadRight,
                              ImGuiKey_GamepadLStickRight, ImGuiKey_RightArrow);
+  // Single steps for lists: holding left/right must not run through them.
+  const bool left_once = Pressed(ImGuiKey_GamepadDpadLeft,
+                                 ImGuiKey_GamepadLStickLeft,
+                                 ImGuiKey_LeftArrow, false);
+  const bool right_once = Pressed(ImGuiKey_GamepadDpadRight,
+                                  ImGuiKey_GamepadLStickRight,
+                                  ImGuiKey_RightArrow, false);
   const bool accept =
       Pressed(ImGuiKey_GamepadFaceDown, ImGuiKey_Enter, ImGuiKey_None, false);
   const bool back = Pressed(ImGuiKey_GamepadFaceRight, ImGuiKey_Escape,
@@ -851,10 +858,12 @@ inline bool Draw(State& st, const std::vector<Category>& cats, float s,
         st.row = (st.row + opt_count - 1) % opt_count;
       } else if (down) {
         st.row = (st.row + 1) % opt_count;
-      } else if (left && IsValueKind(o)) {
-        Change(o, -1);
-      } else if (right && IsValueKind(o)) {
-        Change(o, +1);
+      // Left/right only adjust sliders and lists. On/off switches change
+      // with A alone, so a stray direction never flips one by accident.
+      } else if (o.kind == Kind::kRange && (left || right)) {
+        Change(o, left ? -1 : +1);
+      } else if (o.kind == Kind::kChoice && (left_once || right_once)) {
+        Change(o, left_once ? -1 : +1);
       } else if (accept) {
         if (o.kind == Kind::kAction) {
           if (o.action) o.action();
