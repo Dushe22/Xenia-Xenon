@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <new>
 
 #include "third_party/snappy/snappy-sinksource.h"
 #include "third_party/snappy/snappy.h"
@@ -85,9 +86,17 @@ void TraceWriter::Close() {
 void TraceWriter::Write(const void* data, size_t size) {
   if (file_) {
     fwrite(data, 1, size, file_);
-  } else if (memory_mode_) {
+  } else if (memory_mode_ && !memory_failed_) {
     const uint8_t* bytes = static_cast<const uint8_t*>(data);
-    memory_current_->insert(memory_current_->end(), bytes, bytes + size);
+    try {
+      memory_current_->insert(memory_current_->end(), bytes, bytes + size);
+    } catch (const std::bad_alloc&) {
+      // Stop recording instead of taking the emulator down; the command
+      // processor closes the capture at the next swap.
+      memory_failed_ = true;
+      memory_current_->clear();
+      memory_current_->shrink_to_fit();
+    }
   }
 }
 
@@ -98,6 +107,8 @@ bool TraceWriter::OpenMemory(uint32_t title_id) {
   memory_current_ = std::make_shared<std::vector<uint8_t>>();
   memory_current_->reserve(size_t(4) << 20);
   memory_current_keyframe_ = true;
+  memory_frame_size_estimate_ = size_t(1) << 20;
+  memory_failed_ = false;
   cached_memory_reads_.clear();
   return true;
 }
@@ -107,9 +118,19 @@ void TraceWriter::EndMemoryFrame(bool next_is_keyframe, uint32_t max_groups,
   if (!memory_mode_) {
     return;
   }
+  // Keep only what the frame used: a keyframe is much bigger than the frames
+  // after it, and spare capacity in every kept frame would add up to gigabytes.
+  if (memory_current_->capacity() - memory_current_->size() >
+      memory_current_->size() / 8 + (size_t(256) << 10)) {
+    memory_current_->shrink_to_fit();
+  }
+  if (!memory_current_keyframe_) {
+    memory_frame_size_estimate_ =
+        (memory_frame_size_estimate_ * 7 + memory_current_->size()) / 8;
+  }
   {
     std::lock_guard<std::mutex> lock(memory_mutex_);
-    memory_completed_bytes_ += memory_current_->size();
+    memory_completed_bytes_ += memory_current_->capacity();
     memory_completed_.push_back({memory_current_, memory_current_keyframe_});
     // Drop the oldest groups while over the limits, but always keep the
     // newest complete group (the one before the next keyframe).
@@ -131,15 +152,16 @@ void TraceWriter::EndMemoryFrame(bool next_is_keyframe, uint32_t max_groups,
       }
       // Pop the whole oldest group.
       do {
-        memory_completed_bytes_ -= memory_completed_.front().data->size();
+        memory_completed_bytes_ -= memory_completed_.front().data->capacity();
         memory_completed_.pop_front();
       } while (!memory_completed_.empty() &&
                !memory_completed_.front().keyframe);
     }
   }
-  size_t reserve = std::max(memory_current_->size(), size_t(1) << 20);
   memory_current_ = std::make_shared<std::vector<uint8_t>>();
-  memory_current_->reserve(reserve);
+  memory_current_->reserve(
+      std::max(memory_frame_size_estimate_ + memory_frame_size_estimate_ / 4,
+               size_t(256) << 10));
   memory_current_keyframe_ = next_is_keyframe;
   if (next_is_keyframe) {
     cached_memory_reads_.clear();

@@ -584,7 +584,12 @@ bool COMMAND_PROCESSOR::ExecutePacketType3(uint32_t packet) XE_RESTRICT {
           trace_state_ = TraceState::kDisabled;
           trace_writer_.Close();
         } else if (trace_state_ == TraceState::kRolling) {
-          if (!cvars::trace_rolling_capture) {
+          if (trace_writer_.memory_failed()) {
+            trace_state_ = TraceState::kDisabled;
+            trace_writer_.Close();
+            cvars::trace_rolling_capture = false;
+            XELOGE("Rolling capture: out of memory, stopped");
+          } else if (!cvars::trace_rolling_capture) {
             trace_state_ = TraceState::kDisabled;
             trace_writer_.Close();
             XELOGI("Rolling capture: stopped");
@@ -601,6 +606,10 @@ bool COMMAND_PROCESSOR::ExecutePacketType3(uint32_t packet) XE_RESTRICT {
                     << 20);
             if (keyframe) {
               trace_rolling_frames_since_keyframe_ = 0;
+              TraceWriter::MemoryCapture kept =
+                  trace_writer_.GetMemoryCapture();
+              XELOGI("Rolling capture: keyframe, {} frames kept ({} MB)",
+                     kept.segments.size(), kept.bytes >> 20);
               InitializeTrace();
             }
           }
@@ -608,12 +617,12 @@ bool COMMAND_PROCESSOR::ExecutePacketType3(uint32_t packet) XE_RESTRICT {
       }
       // Rolling capture is switched on from the settings at any time.
       if (cvars::trace_rolling_capture &&
-          trace_state_ == TraceState::kDisabled && !trace_writer_.is_open() &&
-          kernel_state_->GetExecutableModule()) {
+          trace_state_ == TraceState::kDisabled && !trace_writer_.is_open()) {
+        auto* module = kernel_state_->GetExecutableModule().get();
         trace_state_ = TraceState::kRolling;
-        trace_writer_.OpenMemory(
-            kernel_state_->GetExecutableModule()->title_id());
+        trace_writer_.OpenMemory(module ? module->title_id() : 0);
         trace_rolling_frames_since_keyframe_ = 0;
+        XELOGI("Rolling capture: starting");
         InitializeTrace();
         XELOGI("Rolling capture: started");
       }
