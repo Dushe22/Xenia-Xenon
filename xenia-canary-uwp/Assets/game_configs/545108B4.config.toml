@@ -7,3 +7,8 @@
 
 [Memory]
 ignore_offset_for_ranged_allocations = true
+
+[GPU]
+# Asynchronous shader compilation slows matches to slow motion on Xbox
+# (the compile threads take CPU time from the emulator).
+async_shader_compilation = false
