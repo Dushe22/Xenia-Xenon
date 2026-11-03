@@ -785,6 +785,7 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_WAIT_REG_MEM(
                 : register_file_->values[poll_reg_addr];
 
   bool matched = false;
+  const auto wait_start = std::chrono::steady_clock::now();
 
   do {
     uint32_t value = value_ref;
@@ -801,6 +802,16 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_WAIT_REG_MEM(
     }
     matched = MatchValueAndRef(value & mask, ref, wait_info);
 
+    if (!matched && cvars::gpu_wait_timeout_ms > 0 &&
+        std::chrono::steady_clock::now() - wait_start >=
+            std::chrono::milliseconds(cvars::gpu_wait_timeout_ms)) {
+      XELOGW(
+          "WAIT_REG_MEM timed out: {} {:08X}, value {:08X} & mask {:08X}, "
+          "ref {:08X}, function {}",
+          is_memory ? "memory" : "register", poll_reg_addr, value, mask, ref,
+          wait_info & 0x7);
+      break;
+    }
     if (!matched) {
       // Wait.
       if (wait >= 0x100) {

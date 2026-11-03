@@ -162,6 +162,8 @@ void TracePlayer::PlayTraceOnThread(const uint8_t* trace_data,
         }
         if (pending_break) {
           playing_trace_ = false;
+          // Wake WaitOnPlayback here too, or seeking frame by frame hangs.
+          playback_event_->Set();
           return;
         }
         break;

@@ -23,6 +23,11 @@ DEFINE_int32(trace_rolling_capture_keyframe_frames, 150,
              "Rolling capture: frames between full state snapshots. The saved "
              "trace holds between one and two of these intervals.",
              "GPU.Debug");
+DEFINE_int32(gpu_wait_timeout_ms, 0,
+             "Give up on a GPU wait (WAIT_REG_MEM) after this many ms and log "
+             "it. 0 waits forever. For trace replays, where the CPU side that "
+             "would end the wait is missing.",
+             "GPU.Debug");
 DEFINE_int32(trace_rolling_capture_max_mb, 1024,
              "Rolling capture: maximum memory for the kept frames, in MB.",
              "GPU.Debug");

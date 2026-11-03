@@ -125,6 +125,10 @@ bool TraceDump::Setup() {
   // being created asynchronously, so draws using them would be missing from
   // the output, which would also vary between runs.
   cvars::async_shader_compilation = false;
+  // A replay has no CPU to end waits on values it would have written.
+  if (cvars::gpu_wait_timeout_ms <= 0) {
+    cvars::gpu_wait_timeout_ms = 500;
+  }
 
   // Create the emulator but don't initialize so we can setup the window.
   emulator_ = std::make_unique<Emulator>("", "", "", "");
