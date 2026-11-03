@@ -583,7 +583,39 @@ bool COMMAND_PROCESSOR::ExecutePacketType3(uint32_t packet) XE_RESTRICT {
         if (trace_state_ == TraceState::kSingleFrame) {
           trace_state_ = TraceState::kDisabled;
           trace_writer_.Close();
+        } else if (trace_state_ == TraceState::kRolling) {
+          if (!cvars::trace_rolling_capture) {
+            trace_state_ = TraceState::kDisabled;
+            trace_writer_.Close();
+            XELOGI("Rolling capture: stopped");
+          } else {
+            ++trace_rolling_frames_since_keyframe_;
+            bool keyframe =
+                trace_rolling_frames_since_keyframe_ >=
+                uint32_t(std::max(cvars::trace_rolling_capture_keyframe_frames,
+                                  int32_t(1)));
+            trace_writer_.EndMemoryFrame(
+                keyframe, 2,
+                uint64_t(std::max(cvars::trace_rolling_capture_max_mb,
+                                  int32_t(0)))
+                    << 20);
+            if (keyframe) {
+              trace_rolling_frames_since_keyframe_ = 0;
+              InitializeTrace();
+            }
+          }
         }
+      }
+      // Rolling capture is switched on from the settings at any time.
+      if (cvars::trace_rolling_capture &&
+          trace_state_ == TraceState::kDisabled && !trace_writer_.is_open() &&
+          kernel_state_->GetExecutableModule()) {
+        trace_state_ = TraceState::kRolling;
+        trace_writer_.OpenMemory(
+            kernel_state_->GetExecutableModule()->title_id());
+        trace_rolling_frames_since_keyframe_ = 0;
+        InitializeTrace();
+        XELOGI("Rolling capture: started");
       }
       // A frame requested with SetTraceFrameNumbers, numbered by the swaps
       // before it. This is checked after closing the previous trace so

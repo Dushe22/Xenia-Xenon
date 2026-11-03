@@ -366,6 +366,9 @@ inline const std::vector<Category>& Categories() {
                  "d3d12_submit_on_primary_buffer_end"),
           Toggle("Clear memory page state", "clear_memory_page_state"),
           Toggle("Shader depth fix", "d3d12_shader_depth_fix"),
+          Toggle("Continuous capture", "trace_rolling_capture",
+                 "Lowers performance. Leave it off unless you are capturing a "
+                 "glitch."),
           Toggle("Tiled shared memory", "d3d12_enable_tiled_shared_memory",
                  "Keep this off on Xbox, otherwise games will crash.")}});
     c.push_back({"Audio",
@@ -563,6 +566,10 @@ inline const std::vector<Category>& Categories() {
          "update, at a performance cost."},
         {"d3d12_enable_tiled_shared_memory",
          "Uses tiled resources for the emulated shared memory."},
+        {"trace_rolling_capture",
+         "Keeps the last seconds of gameplay in memory. When you see a glitch, "
+         "open the quick menu and choose Capture GPU frame to save it to the "
+         "traces folder."},
         {"d3d12_shader_depth_fix",
          "Fixes see-through or invisible characters in some games, such as WWE "
          "13. Restart the game after changing it."},

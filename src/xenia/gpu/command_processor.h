@@ -591,8 +591,13 @@ class CommandProcessor {
     kDisabled,
     kStreaming,
     kSingleFrame,
+    // trace_rolling_capture: frames kept in memory, saved on request.
+    kRolling,
   };
   TraceState trace_state_ = TraceState::kDisabled;
+  uint32_t trace_rolling_frames_since_keyframe_ = 0;
+  // Saves the frames kept by the rolling capture on another thread.
+  void SaveRollingTrace(const std::filesystem::path& root_path);
   std::filesystem::path trace_stream_path_;
   std::filesystem::path trace_frame_path_;
   // Frame numbers passed to SetTraceFrameNumbers, and the number of swaps

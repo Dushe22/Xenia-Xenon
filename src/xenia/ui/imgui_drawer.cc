@@ -1505,6 +1505,22 @@ void ImGuiDrawer::UpdateGamepads() {
       }
     }
   }
+#if XE_PLATFORM_WINRT
+  // On UWP the window feeds the controller into ImGui every frame
+  // (UWP::UpdateImGuiIO), with the left stick as repeating D-pad presses.
+  // Writing the same keys here too, and clearing them in frames without a
+  // button down, made the D-pad flicker between pressed and released, so
+  // menus moved on their own. Only the Guide button is handled here.
+  io.BackendFlags |= ImGuiBackendFlags_HasGamepad;
+  if (controller_to_poke != XUserIndexNone &&
+      gamepad_state.gamepad.buttons ==
+          hid::X_INPUT_GAMEPAD_BUTTON::X_INPUT_GAMEPAD_GUIDE &&
+      onGuidePressFunction_) {
+    onGuidePressFunction_(controller_to_poke);
+  }
+  return;
+#endif
+
   if (controller_to_poke == XUserIndexNone) {
     io.ClearInputKeys();
     return;

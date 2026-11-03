@@ -12,6 +12,20 @@
 DEFINE_path(trace_gpu_prefix, "scratch/gpu/",
             "Prefix path for GPU trace files.", "GPU.Debug");
 DEFINE_bool(trace_gpu_stream, false, "Trace all GPU packets.", "GPU.Debug");
+DEFINE_bool(
+    trace_rolling_capture, false,
+    "Keep the last seconds of GPU commands in memory, so a frame trace "
+    "request (Capture frame in the quick menu) saves what already happened "
+    "instead of the next frame. For catching rare glitches. Costs "
+    "performance and memory, and causes a short hitch at every keyframe.",
+    "GPU.Debug");
+DEFINE_int32(trace_rolling_capture_keyframe_frames, 150,
+             "Rolling capture: frames between full state snapshots. The saved "
+             "trace holds between one and two of these intervals.",
+             "GPU.Debug");
+DEFINE_int32(trace_rolling_capture_max_mb, 1024,
+             "Rolling capture: maximum memory for the kept frames, in MB.",
+             "GPU.Debug");
 DEFINE_string(trace_gpu_frames, "",
               "Comma-separated frame numbers to capture as single frame GPU "
               "traces, the same way as a manual frame trace request, for "

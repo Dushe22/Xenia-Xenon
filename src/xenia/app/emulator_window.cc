@@ -93,6 +93,7 @@ DECLARE_bool(guide_button);
 DECLARE_bool(clear_memory_page_state);
 
 DECLARE_string(readback_resolve);
+DECLARE_bool(trace_rolling_capture);
 
 DECLARE_int32(user_language);
 
@@ -265,7 +266,7 @@ namespace app {
 
 // Lets the right stick scroll the current window (frontend pages).
 static xe::app::xenon_settings::State* g_xenon_active_page_state = nullptr;
-static constexpr char kXenonVersion[] = "1.2.4.4";
+static constexpr char kXenonVersion[] = "1.2.4.5";
 static bool g_xenon_pergame_on_right = false;
 
 static void XenonGamepadScroll() {
@@ -2721,8 +2722,10 @@ void EmulatorWindow::QuickMenuDialog::OnDraw(ImGuiIO& io) {
     const float wy = y + kRowCount * (row_h + row_gap) + 24.0f * s;
     dl->AddText(ui_font, 21.0f * s, ImVec2(cx + 6.0f * s, wy),
                 C(150, 220, 170, 255),
-                Tr("Next frame will be saved to traces"), nullptr,
-                cw - 12.0f * s);
+                cvars::trace_rolling_capture
+                    ? Tr("The last seconds were saved to traces")
+                    : Tr("Next frame will be saved to traces"),
+                nullptr, cw - 12.0f * s);
   }
   if (confirm_exit_) {
     const float wy = y + kRowCount * (row_h + row_gap) + 24.0f * s;

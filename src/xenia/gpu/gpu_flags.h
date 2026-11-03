@@ -13,6 +13,9 @@
 
 DECLARE_path(trace_gpu_prefix);
 DECLARE_bool(trace_gpu_stream);
+DECLARE_bool(trace_rolling_capture);
+DECLARE_int32(trace_rolling_capture_keyframe_frames);
+DECLARE_int32(trace_rolling_capture_max_mb);
 DECLARE_string(trace_gpu_frames);
 
 DECLARE_path(dump_shaders);

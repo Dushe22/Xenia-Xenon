@@ -10,9 +10,13 @@
 #ifndef XENIA_GPU_TRACE_WRITER_H_
 #define XENIA_GPU_TRACE_WRITER_H_
 
+#include <deque>
 #include <filesystem>
+#include <memory>
+#include <mutex>
 #include <set>
 #include <string>
+#include <vector>
 
 #include "xenia/gpu/registers.h"
 #include "xenia/gpu/trace_protocol.h"
@@ -41,9 +45,30 @@ class TraceWriter {
   explicit TraceWriter(uint8_t* membase);
   ~TraceWriter();
 
-  bool is_open() const { return file_ != nullptr; }
+  bool is_open() const { return file_ != nullptr || memory_mode_; }
+  bool is_memory_mode() const { return memory_mode_; }
 
   bool Open(const std::filesystem::path& path, uint32_t title_id);
+  // Rolling capture: frames are kept in memory instead of a file. Every frame
+  // is a segment, and a keyframe segment starts with the full state (written
+  // by the command processor's InitializeTrace). Only the newest keyframe
+  // groups are kept.
+  bool OpenMemory(uint32_t title_id);
+  // Ends the current frame segment after its swap event, and starts the next
+  // one, which is a keyframe if requested. Old groups are dropped to stay
+  // within max_groups keyframe groups and max_bytes.
+  void EndMemoryFrame(bool next_is_keyframe, uint32_t max_groups,
+                      uint64_t max_bytes);
+  // Thread-safe snapshot of the completed segments, oldest keyframe first.
+  struct MemoryCapture {
+    uint32_t title_id = 0;
+    std::vector<std::shared_ptr<const std::vector<uint8_t>>> segments;
+    uint64_t bytes = 0;
+  };
+  MemoryCapture GetMemoryCapture() const;
+  // Writes a capture as a trace file. Can be called on any thread.
+  static bool SaveMemoryCapture(const MemoryCapture& capture,
+                                const std::filesystem::path& path);
   void Flush();
   void Close();
 
@@ -70,10 +95,27 @@ class TraceWriter {
  private:
   void WriteMemoryCommand(TraceCommandType type, uint32_t base_ptr,
                           size_t length, const void* host_ptr = nullptr);
+  // Writes to the file, or to the current memory segment.
+  void Write(const void* data, size_t size);
+  bool compressing() const { return compress_output_ && file_ != nullptr; }
 
   std::set<uint64_t> cached_memory_reads_;
   uint8_t* membase_;
   FILE* file_;
+
+  struct MemorySegment {
+    std::shared_ptr<std::vector<uint8_t>> data;
+    bool keyframe;
+  };
+  bool memory_mode_ = false;
+  uint32_t memory_title_id_ = 0;
+  // Written only by the command processor thread.
+  std::shared_ptr<std::vector<uint8_t>> memory_current_;
+  bool memory_current_keyframe_ = false;
+  // Guarded by memory_mutex_ (read by the thread saving a capture).
+  std::deque<MemorySegment> memory_completed_;
+  uint64_t memory_completed_bytes_ = 0;
+  mutable std::mutex memory_mutex_;
 
   bool compress_output_ = true;
   size_t compression_threshold_ = 1024;  // Min. number of bytes to compress.
@@ -84,6 +126,7 @@ class TraceWriter {
   constexpr explicit TraceWriter(uint8_t* membase) {}
 
   static constexpr bool is_open() { return false; }
+  static constexpr bool is_memory_mode() { return false; }
 
   static constexpr bool Open(const std::filesystem::path& path,
                              uint32_t title_id) {

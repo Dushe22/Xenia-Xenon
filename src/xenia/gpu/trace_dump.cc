@@ -53,6 +53,11 @@ DEFINE_string(
     "untiled byte-swapped RGBA (<output>_<base>.rgba). Use with "
     "readback_resolve=full so resolve results reach guest memory.",
     "GPU.Debug");
+DEFINE_bool(trace_dump_all_frames, false,
+            "Play every frame of a multi-frame trace (such as a rolling "
+            "capture) and save each one as <output>_f<frame>.png. The main "
+            "PNG is then the last frame.",
+            "GPU.Debug");
 
 namespace xe {
 namespace gpu {
@@ -153,6 +158,39 @@ int TraceDump::Run() {
   player_->SeekCommand(
       static_cast<int>(player_->current_frame()->commands.size() - 1));
   player_->WaitOnPlayback();
+
+  if (cvars::trace_dump_all_frames) {
+    ui::Presenter* frame_presenter = graphics_system_->presenter();
+    auto save_frame = [&](int frame_index) {
+      ui::RawImage frame_image;
+      if (!frame_presenter ||
+          !frame_presenter->CaptureGuestOutput(frame_image)) {
+        return;
+      }
+      std::filesystem::path frame_path = base_output_path_;
+      frame_path += fmt::format("_f{:04}.png", frame_index);
+      FILE* frame_file = filesystem::OpenFile(frame_path, "wb");
+      if (!frame_file) {
+        return;
+      }
+      stbi_write_png_to_func(
+          [](void* context, void* data, int size) {
+            fwrite(data, 1, size, (FILE*)context);
+          },
+          frame_file, static_cast<int>(frame_image.width),
+          static_cast<int>(frame_image.height), 4, frame_image.data.data(),
+          static_cast<int>(frame_image.stride));
+      fclose(frame_file);
+    };
+    save_frame(0);
+    int frame_count = player_->frame_count();
+    XELOGI("Trace dump: {} frames", frame_count);
+    for (int frame_index = 1; frame_index < frame_count; ++frame_index) {
+      player_->SeekFrame(frame_index);
+      player_->WaitOnPlayback();
+      save_frame(frame_index);
+    }
+  }
   EndHostCapture();
 
   // Save requested tiled 32bpp textures from guest memory, untiled.

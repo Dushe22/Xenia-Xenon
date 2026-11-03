@@ -10,11 +10,13 @@
 #include "xenia/gpu/command_processor.h"
 
 #include <algorithm>
+#include <thread>
 
 #include "third_party/fmt/include/fmt/format.h"
 #include "xenia/base/byte_stream.h"
 #include "xenia/base/clock.h"
 #include "xenia/base/cvar.h"
+#include "xenia/base/filesystem.h"
 #include "xenia/base/logging.h"
 #include "xenia/base/profiling.h"
 #include "xenia/gpu/gpu_flags.h"
@@ -254,6 +256,10 @@ void CommandProcessor::InitializeShaderStorage(
 
 void CommandProcessor::RequestFrameTrace(
     const std::filesystem::path& root_path) {
+  if (trace_state_ == TraceState::kRolling) {
+    SaveRollingTrace(root_path);
+    return;
+  }
   if (trace_state_ == TraceState::kStreaming) {
     XELOGE("Streaming trace; cannot also trace frame.");
     return;
@@ -274,7 +280,34 @@ void CommandProcessor::SetTraceFrameNumbers(
   trace_frame_numbers_ = std::move(frame_numbers);
 }
 
+void CommandProcessor::SaveRollingTrace(
+    const std::filesystem::path& root_path) {
+  TraceWriter::MemoryCapture capture = trace_writer_.GetMemoryCapture();
+  if (capture.segments.empty()) {
+    XELOGW("Rolling capture: nothing recorded yet");
+    return;
+  }
+  auto path = root_path / fmt::format("{:08X}_rolling_{}.xtr",
+                                      capture.title_id, trace_swap_count_);
+  XELOGI("Rolling capture: saving {} frames ({} MB) to {}",
+         capture.segments.size(), capture.bytes >> 20, xe::path_to_utf8(path));
+  // The segments are shared and immutable, so they can be written while the
+  // recording goes on.
+  std::thread([capture = std::move(capture), path]() {
+    bool saved = TraceWriter::SaveMemoryCapture(capture, path);
+    if (saved) {
+      XELOGI("Rolling capture: saved {}", xe::path_to_utf8(path));
+    } else {
+      XELOGE("Rolling capture: failed to save {}", xe::path_to_utf8(path));
+    }
+  }).detach();
+}
+
 void CommandProcessor::BeginTracing(const std::filesystem::path& root_path) {
+  if (trace_state_ == TraceState::kRolling) {
+    XELOGE("Rolling capture active; ignoring streaming request.");
+    return;
+  }
   if (trace_state_ == TraceState::kStreaming) {
     XELOGE("Streaming already active; ignoring request.");
     return;
