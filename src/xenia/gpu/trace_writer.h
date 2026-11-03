@@ -22,6 +22,10 @@
 // total. with inlining they just bloat the caller and negatively impact
 // register allocation for the caller
 // XENIA_ENABLE_GPU_TRACE enables it in Release too.
+// Xenon: enabled so the quick menu can capture a frame on the console.
+#ifndef XE_OPTION_GPU_TRACE
+#define XE_OPTION_GPU_TRACE 1
+#endif
 #if defined(NDEBUG) && !defined(XE_OPTION_GPU_TRACE)
 #define XE_ENABLE_TRACE_WRITER_INSTRUMENTATION 0
 #else

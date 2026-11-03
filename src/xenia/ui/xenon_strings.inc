@@ -851,3 +851,7 @@
  {"Pulsa A otra vez para salir. Se perderá el progreso sin guardar.", "Pressione A de novo para sair. O progresso não salvo será perdido.", "Appuyez de nouveau sur A pour quitter. La progression non sauvegardée sera perdue.", "Drücke erneut A zum Beenden. Nicht gespeicherter Fortschritt geht verloren.", "Premi di nuovo A per uscire. I progressi non salvati andranno persi.", "終了するにはもう一度 A を押してください。保存していない進行状況は失われます。", "종료하려면 A를 한 번 더 누르세요. 저장하지 않은 진행 상황은 사라집니다.", "再按一次 A 退出。未保存的进度将丢失。", "Нажмите A ещё раз, чтобы выйти. Несохранённый прогресс будет потерян."}},
 {"Playing for {}",
  {"Tiempo de juego: {}", "Tempo de jogo: {}", "Temps de jeu : {}", "Spielzeit: {}", "Tempo di gioco: {}", "プレイ時間: {}", "플레이 시간: {}", "游戏时间：{}", "Время игры: {}"}},
+{"Capture GPU frame",
+ {"Capturar cuadro de GPU", "Capturar quadro da GPU", "Capturer une image GPU", "GPU-Frame aufzeichnen", "Cattura fotogramma GPU", "GPU フレームをキャプチャ", "GPU 프레임 캡처", "捕获 GPU 帧", "Захват кадра GPU"}},
+{"Next frame will be saved to traces",
+ {"El próximo cuadro se guardará en traces", "O próximo quadro será salvo em traces", "La prochaine image sera enregistrée dans traces", "Der nächste Frame wird in traces gespeichert", "Il prossimo fotogramma verrà salvato in traces", "次のフレームを traces に保存します", "다음 프레임이 traces에 저장됩니다", "下一帧将保存到 traces", "Следующий кадр будет сохранён в traces"}},

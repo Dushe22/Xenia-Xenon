@@ -429,6 +429,7 @@ class EmulatorWindow {
     bool confirm_exit_ = false;
     float cache_note_ = 0.0f;  // Seconds left on "GPU cache cleared".
     bool inputs_armed_ = false;  // Ignore buttons held when it opened.
+    float capture_note_ = 0.0f;  // Seconds left for the capture note.
     int nav_dir_ = 0;  // Direction currently held (0 = none).
     std::chrono::steady_clock::time_point nav_next_repeat_{};
   };

@@ -306,6 +306,16 @@ void SetupConfig(const std::filesystem::path& config_folder) {
 }
 
 void LoadGameConfig(const std::string_view title_id) {
+  // Fixes shipped with the app for known titles. The user's own per-game
+  // config is read after, so it can override them.
+  const std::filesystem::path bundled_config_path =
+      std::filesystem::path("Assets") / "game_configs" /
+      (std::string(title_id) + game_config_suffix);
+  std::error_code ec;
+  if (std::filesystem::exists(bundled_config_path, ec)) {
+    ReadGameConfig(bundled_config_path);
+  }
+
   const auto game_config_folder = config_folder / "config";
   const auto game_config_path =
       game_config_folder / (std::string(title_id) + game_config_suffix);

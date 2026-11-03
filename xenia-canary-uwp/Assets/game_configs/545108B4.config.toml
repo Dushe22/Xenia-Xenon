@@ -1,0 +1,9 @@
+# WWE '13 (545108B4)
+#
+# The game checks that ranged physical allocations start at or above the
+# requested minimum address. Xenia's 4 KB heap offset puts them below it,
+# so allocations fail with plenty of memory free, which leads to missing
+# models and null-pointer crashes during matches.
+
+[Memory]
+ignore_offset_for_ranged_allocations = true

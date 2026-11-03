@@ -50,6 +50,7 @@
 #include "xenia/emulator.h"
 #include "xenia/gpu/command_processor.h"
 #include "xenia/gpu/d3d12/d3d12_command_processor.h"
+#include "xenia/gpu/gpu_flags.h"
 #include "xenia/gpu/graphics_system.h"
 #include "xenia/hid/input_system.h"
 #include "xenia/kernel/xam/ui/create_profile_ui.h"
@@ -264,7 +265,7 @@ namespace app {
 
 // Lets the right stick scroll the current window (frontend pages).
 static xe::app::xenon_settings::State* g_xenon_active_page_state = nullptr;
-static constexpr char kXenonVersion[] = "1.2.2.5";
+static constexpr char kXenonVersion[] = "1.2.2.7";
 static bool g_xenon_pergame_on_right = false;
 
 static void XenonGamepadScroll() {
@@ -2464,7 +2465,15 @@ void EmulatorWindow::QuickMenuDialog::OnDraw(ImGuiIO& io) {
   Emulator* emulator = emulator_window_.emulator();
   hid::InputSystem* input = emulator->input_system();
 
-  enum Row { kResume, kCpuSpeed, kVibration, kClearCache, kExit, kRowCount };
+  enum Row {
+    kResume,
+    kCpuSpeed,
+    kVibration,
+    kClearCache,
+    kCaptureFrame,
+    kExit,
+    kRowCount
+  };
   constexpr double kSpeeds[] = {0.5, 1.0, 2.0};
   constexpr const char* kSpeedNames[] = {"0.5x", "1x", "2x"};
   int speed_index = 1;
@@ -2548,6 +2557,21 @@ void EmulatorWindow::QuickMenuDialog::OnDraw(ImGuiIO& io) {
           emulator_window_.GpuClearCaches();
           cache_note_ = 2.0f;
           break;
+        case kCaptureFrame:
+          // Records the next frame after the game resumes into
+          // <storage root>/traces as <title id>_<frame>.xtr.
+          if (auto* graphics = emulator_window_.emulator()->graphics_system()) {
+            const std::filesystem::path traces =
+                emulator_window_.emulator()->storage_root() / "traces";
+            std::error_code ec;
+            std::filesystem::create_directories(traces, ec);
+            cvars::trace_gpu_prefix = traces;
+            graphics->RequestFrameTrace();
+            XELOGI("Quick menu: GPU frame capture requested ({})",
+                   xe::path_to_utf8(traces));
+            capture_note_ = 2.5f;
+          }
+          break;
         case kExit:
           if (confirm_exit_) {
             UWP::RestartApp();
@@ -2567,6 +2591,7 @@ void EmulatorWindow::QuickMenuDialog::OnDraw(ImGuiIO& io) {
     }
   }
   cache_note_ = std::max(0.0f, cache_note_ - dt);
+  capture_note_ = std::max(0.0f, capture_note_ - dt);
 
   // ---- Draw --------------------------------------------------------------
   ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
@@ -2632,9 +2657,9 @@ void EmulatorWindow::QuickMenuDialog::OnDraw(ImGuiIO& io) {
   const float row_h = 72.0f * s;
   const float row_gap = 12.0f * s;
   const float text_size = 27.0f * s;
-  const char* labels[kRowCount] = {Tr("Resume"), Tr("CPU speed"),
-                                   Tr("Vibration"), Tr("Clear GPU cache"),
-                                   Tr("Exit game")};
+  const char* labels[kRowCount] = {
+      Tr("Resume"),          Tr("CPU speed"),         Tr("Vibration"),
+      Tr("Clear GPU cache"), Tr("Capture GPU frame"), Tr("Exit game")};
   for (int i = 0; i < kRowCount; ++i) {
     const bool selected = i == row_;
     const bool danger = i == kExit;
@@ -2691,6 +2716,13 @@ void EmulatorWindow::QuickMenuDialog::OnDraw(ImGuiIO& io) {
                   selected ? C(255, 255, 255, 220) : C(150, 220, 170, 255),
                   note);
     }
+  }
+  if (capture_note_ > 0.0f && !confirm_exit_) {
+    const float wy = y + kRowCount * (row_h + row_gap) + 24.0f * s;
+    dl->AddText(ui_font, 21.0f * s, ImVec2(cx + 6.0f * s, wy),
+                C(150, 220, 170, 255),
+                Tr("Next frame will be saved to traces"), nullptr,
+                cw - 12.0f * s);
   }
   if (confirm_exit_) {
     const float wy = y + kRowCount * (row_h + row_gap) + 24.0f * s;
