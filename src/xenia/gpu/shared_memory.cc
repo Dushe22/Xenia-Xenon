@@ -599,6 +599,30 @@ std::pair<uint32_t, uint32_t> SharedMemory::MemoryInvalidationCallback(
                         (page_last - page_first + 1) << page_size_log2_);
 }
 
+void SharedMemory::ForceReuploadCpuRange(uint32_t start, uint32_t length) {
+  if (length == 0 || start >= kBufferSize) {
+    return;
+  }
+  length = std::min(length, kBufferSize - start);
+  uint32_t page_first = start >> page_size_log2_;
+  uint32_t page_last = (start + length - 1) >> page_size_log2_;
+  uint32_t block_first = page_first >> 6;
+  uint32_t block_last = page_last >> 6;
+  auto global_lock = global_critical_region_.Acquire();
+  for (uint32_t i = block_first; i <= block_last; ++i) {
+    uint64_t bits = UINT64_MAX;
+    if (i == block_first) {
+      bits &= ~((uint64_t(1) << (page_first & 63)) - 1);
+    }
+    if (i == block_last && (page_last & 63) != 63) {
+      bits &= (uint64_t(1) << ((page_last & 63) + 1)) - 1;
+    }
+    // Keep GPU-written pages: guest memory doesn't have their data.
+    bits &= ~system_page_flags_valid_and_gpu_written_[i];
+    system_page_flags_valid_[i] &= ~bits;
+  }
+}
+
 void SharedMemory::PrepareForTraceDownload() {
   ReleaseTraceDownloadRanges();
   assert_true(trace_download_ranges_.empty());

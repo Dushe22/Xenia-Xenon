@@ -32,6 +32,11 @@
 #include "xenia/ui/d3d12/d3d12_presenter.h"
 #include "xenia/ui/d3d12/d3d12_util.h"
 
+DEFINE_bool(d3d12_reupload_vertex_data, false,
+            "Upload vertex data from guest memory again for every draw instead "
+            "of trusting the copy on the GPU. Tests for stretched polygons "
+            "caused by stale vertex data. Costs performance.",
+            "D3D12");
 DEFINE_bool(d3d12_bindless, true,
             "Use bindless resources where available - may improve performance, "
             "but may make debugging more complicated.",
@@ -3055,6 +3060,10 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
           global_critical_region::Acquire();
 
       for (uint32_t i = 0; i < vfetch_current_queued; ++i) {
+        if (cvars::d3d12_reupload_vertex_data) {
+          shared_memory_->ForceReuploadCpuRange(vfetch_addresses[i] << 2,
+                                                vfetch_sizes[i] << 2);
+        }
         if (!shared_memory_->RequestRange(vfetch_addresses[i] << 2,
                                           vfetch_sizes[i] << 2)) {
           XELOGE(

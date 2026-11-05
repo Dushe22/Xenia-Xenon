@@ -366,6 +366,8 @@ inline const std::vector<Category>& Categories() {
                  "d3d12_submit_on_primary_buffer_end"),
           Toggle("Clear memory page state", "clear_memory_page_state"),
           Toggle("Shader depth fix", "d3d12_shader_depth_fix"),
+          Toggle("Reupload vertex data", "d3d12_reupload_vertex_data",
+                 "Lowers performance. For testing stretched polygons."),
           Toggle("Continuous capture", "trace_rolling_capture",
                  "Lowers performance. Leave it off unless you are capturing a "
                  "glitch."),
@@ -570,6 +572,10 @@ inline const std::vector<Category>& Categories() {
          "Keeps the last seconds of gameplay in memory. When you see a glitch, "
          "open the quick menu and choose Capture GPU frame to save it to the "
          "traces folder."},
+        {"d3d12_reupload_vertex_data",
+         "Copies the vertex data from game memory again for every draw. Turn "
+         "it on if stretched polygons or random lines appear, to check whether "
+         "the GPU is using outdated data."},
         {"d3d12_shader_depth_fix",
          "Fixes see-through or invisible characters in some games, such as WWE "
          "13. Restart the game after changing it."},

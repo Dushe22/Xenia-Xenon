@@ -104,6 +104,10 @@ class SharedMemory {
   // the pages they touch, the CPU data is properly loaded to the unmodified
   // regions in those pages.
   void RangeWrittenByGpu(uint32_t start, uint32_t length);
+  // Marks the pages of the range that hold CPU data as outdated, so the next
+  // RequestRange uploads them again from guest memory. Pages written by the
+  // GPU are kept. For catching CPU writes that the page watches missed.
+  void ForceReuploadCpuRange(uint32_t start, uint32_t length);
 
  protected:
   SharedMemory(Memory& memory);
