@@ -34,7 +34,7 @@
 
 DECLARE_bool(d3d12_debug);
 
-DEFINE_bool(d3d12_pad_vertex_constants, false,
+DEFINE_bool(d3d12_pad_vertex_constants, true,
             "Put 256 zero constants after the vertex shader float constants, "
             "so shaders that index constants past the end (for example with "
             "bad bone indices) read zeros on every GPU instead of whatever "
