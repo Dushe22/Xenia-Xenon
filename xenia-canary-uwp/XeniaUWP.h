@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <string>
 #include <filesystem>
 
@@ -18,6 +19,9 @@ void StartXenia();
 void ExecutePendingFunctionsFromUIThread();
 void RegisterXeniaWindow(xe::ui::Window* window);
 void UpdateImGuiIO();
+// While set (the quick menu is open), controller input fed to the UI is
+// logged, to find inputs that fire on their own.
+extern std::atomic<bool> g_log_ui_input;
 
 void RefreshPaths();
 std::vector<std::tuple<std::string, std::string>> GetGames();

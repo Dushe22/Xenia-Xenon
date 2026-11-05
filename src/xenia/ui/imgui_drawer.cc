@@ -376,6 +376,13 @@ void ImGuiDrawer::AddDialog(ImGuiDialog* dialog) {
     if (presenter_) {
       presenter_->AddUIDrawerFromUIThread(this, z_order_);
     }
+    // Input keeps arriving while no dialog is open (on UWP the controller is
+    // fed every frame), but no ImGui frame runs to take it, so it queues up.
+    // Without clearing, a dialog opened mid-game replays all of the gameplay
+    // presses, one per frame, and moves and accepts on its own.
+    ImGuiIO& io = GetIO();
+    io.ClearEventsQueue();
+    io.ClearInputKeys();
   }
   dialogs_.push_back(dialog);
 }

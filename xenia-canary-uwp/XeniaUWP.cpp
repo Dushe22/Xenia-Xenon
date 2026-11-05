@@ -24,6 +24,7 @@
 #include "xenia/base/filesystem.h"
 #include "xenia/ui/windowed_app.h"
 #include "xenia/base/cvar.h"
+#include "xenia/base/logging.h"
 #include "xenia/base/clock.h"
 #include "xenia/base/logging.h"
 #include "xenia/ui/window.h"
@@ -185,14 +186,20 @@ void UWP::ExecutePendingFunctionsFromUIThread() {
 
 void UWP::RegisterXeniaWindow(xe::ui::Window* window) { s_window = window; }
 
+std::atomic<bool> UWP::g_log_ui_input{false};
+
 void UWP::UpdateImGuiIO() {
   ImGuiIO& io = ImGui::GetIO();
+  const bool log_input = UWP::g_log_ui_input.load(std::memory_order_relaxed);
   io.AddKeyEvent(ImGuiKey_Backspace, false);
   io.AddKeyEvent(ImGuiKey_Enter, false);
 
   {
     std::unique_lock lk(UWP::g_buffer_mutex);
     for (uint32_t c : UWP::g_char_buffer) {
+      if (log_input) {
+        XELOGI("UI input: character {:02X}", c);
+      }
       io.AddInputCharacter(c);
 
       if (c == '\b') {
@@ -211,7 +218,11 @@ void UWP::UpdateImGuiIO() {
   }
 
   hid::X_INPUT_STATE state;
-  if (driver->GetState(0, &state) != X_STATUS_SUCCESS) {
+  if (X_RESULT get_result = driver->GetState(0, &state);
+      get_result != X_STATUS_SUCCESS) {
+    if (log_input) {
+      XELOGI("UI input: GetState failed {:08X}", get_result);
+    }
     ResetAnalogNavRepeatStates();
     return;
   }
@@ -261,6 +272,27 @@ void UWP::UpdateImGuiIO() {
       UpdateAnalogNavRepeatState(AnalogNavDirection::kUp, ls_up, now_ms);
   const bool analog_nav_down =
       UpdateAnalogNavRepeatState(AnalogNavDirection::kDown, ls_down, now_ms);
+
+  if (log_input) {
+    static uint16_t s_logged_raw = 0, s_logged_buttons = 0;
+    static uint8_t s_logged_pulses = 0;
+    const uint8_t pulses = uint8_t((analog_nav_left ? 1 : 0) |
+                                   (analog_nav_right ? 2 : 0) |
+                                   (analog_nav_up ? 4 : 0) |
+                                   (analog_nav_down ? 8 : 0));
+    const uint16_t raw_buttons = uint16_t(state.gamepad.buttons);
+    if (raw_buttons != s_logged_raw || buttons != s_logged_buttons ||
+        pulses != s_logged_pulses) {
+      XELOGI("UI input {} ms: raw {:04X} reported {:04X} stick {} {} "
+             "pulses {:X} packet {}",
+             now_ms, raw_buttons, buttons, int16_t(state.gamepad.thumb_lx),
+             int16_t(state.gamepad.thumb_ly), pulses,
+             uint32_t(state.packet_number));
+      s_logged_raw = raw_buttons;
+      s_logged_buttons = buttons;
+      s_logged_pulses = pulses;
+    }
+  }
 
   io.AddKeyEvent(ImGuiKey_GamepadDpadLeft,
                  ((buttons & X_INPUT_GAMEPAD_DPAD_LEFT) != 0) ||

@@ -266,7 +266,7 @@ namespace app {
 
 // Lets the right stick scroll the current window (frontend pages).
 static xe::app::xenon_settings::State* g_xenon_active_page_state = nullptr;
-static constexpr char kXenonVersion[] = "1.2.4.8";
+static constexpr char kXenonVersion[] = "1.2.4.10";
 static bool g_xenon_pergame_on_right = false;
 
 static void XenonGamepadScroll() {
@@ -2441,11 +2441,15 @@ void EmulatorWindow::ToggleQuickMenu() {
   emulator_->Pause();
   XELOGI("Quick menu: emulation paused");
   app_context().CallInUIThread([this]() {
+    UWP::g_log_ui_input = true;
+    XELOGI("Quick menu: opened");
     quick_menu_ = new QuickMenuDialog(imgui_drawer_.get(), *this);
   });
 }
 
 void EmulatorWindow::QuickMenuDialog::OnClose() {
+  UWP::g_log_ui_input = false;
+  XELOGI("Quick menu: closed");
   emulator_window_.quick_menu_ = nullptr;
   emulator_window_.emulator()->Resume();
   emulator_window_.quick_menu_unblock_pending_ = true;
@@ -2507,7 +2511,14 @@ void EmulatorWindow::QuickMenuDialog::OnDraw(ImGuiIO& io) {
     inputs_armed_ = !ImGui::IsKeyDown(ImGuiKey_GamepadFaceDown) &&
                     !ImGui::IsKeyDown(ImGuiKey_GamepadFaceRight) &&
                     !ImGui::IsKeyDown(ImGuiKey_GamepadStart) &&
-                    !ImGui::IsKeyDown(ImGuiKey_GamepadBack);
+                    !ImGui::IsKeyDown(ImGuiKey_GamepadBack) &&
+                    !ImGui::IsKeyDown(ImGuiKey_GamepadDpadUp) &&
+                    !ImGui::IsKeyDown(ImGuiKey_GamepadDpadDown) &&
+                    !ImGui::IsKeyDown(ImGuiKey_GamepadDpadLeft) &&
+                    !ImGui::IsKeyDown(ImGuiKey_GamepadDpadRight);
+    if (inputs_armed_) {
+      XELOGI("Quick menu frame {}: inputs armed", ImGui::GetFrameCount());
+    }
   }
   // Directions use their own repeat: one step on press, then a delay and a
   // steady rate while held. ImGui's repeat runs far too fast here.
@@ -2544,6 +2555,16 @@ void EmulatorWindow::QuickMenuDialog::OnDraw(ImGuiIO& io) {
         pressed(ImGuiKey_GamepadFaceDown) || pressed(ImGuiKey_Enter);
     const bool back =
         pressed(ImGuiKey_GamepadFaceRight) || pressed(ImGuiKey_Escape);
+    if (up || down || left || right || accept || back) {
+      XELOGI(
+          "Quick menu frame {} ({:.0f} ms): {}{}{}{}{}{} row {} "
+          "A down {} enter down {}",
+          ImGui::GetFrameCount(), io.DeltaTime * 1000.0f, up ? "up " : "",
+          down ? "down " : "", left ? "left " : "", right ? "right " : "",
+          accept ? "accept " : "", back ? "back " : "", row_,
+          ImGui::IsKeyDown(ImGuiKey_GamepadFaceDown) ? 1 : 0,
+          ImGui::IsKeyDown(ImGuiKey_Enter) ? 1 : 0);
+    }
     if (up || down) {
       row_ = (row_ + (down ? 1 : kRowCount - 1)) % kRowCount;
       confirm_exit_ = false;
