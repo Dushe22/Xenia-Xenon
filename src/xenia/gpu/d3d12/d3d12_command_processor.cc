@@ -32,11 +32,8 @@
 #include "xenia/ui/d3d12/d3d12_presenter.h"
 #include "xenia/ui/d3d12/d3d12_util.h"
 
-DEFINE_bool(d3d12_reupload_vertex_data, false,
-            "Upload vertex data from guest memory again for every draw instead "
-            "of trusting the copy on the GPU. Tests for stretched polygons "
-            "caused by stale vertex data. Costs performance.",
-            "D3D12");
+DECLARE_bool(d3d12_debug);
+
 DEFINE_bool(d3d12_bindless, true,
             "Use bindless resources where available - may improve performance, "
             "but may make debugging more complicated.",
@@ -2302,6 +2299,10 @@ void D3D12CommandProcessor::IssueSwap(uint32_t frontbuffer_ptr,
                                       uint32_t frontbuffer_height) {
   SCOPE_profile_cpu_f("gpu");
   EndZPDFrame();
+
+  if (cvars::d3d12_debug) {
+    GetD3D12Provider().LogD3D12DebugMessages();
+  }
 
   ui::Presenter* presenter = graphics_system_->presenter();
   if (!presenter) {

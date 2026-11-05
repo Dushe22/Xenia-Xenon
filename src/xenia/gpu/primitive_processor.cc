@@ -17,6 +17,7 @@
 #include "xenia/base/logging.h"
 #include "xenia/base/math.h"
 #include "xenia/base/profiling.h"
+#include "xenia/gpu/gpu_flags.h"
 #include "xenia/gpu/register_file.h"
 #include "xenia/gpu/registers.h"
 #include "xenia/gpu/shader.h"
@@ -1031,6 +1032,10 @@ bool PrimitiveProcessor::Process(ProcessingResult& result_out) {
           ProcessedIndexBufferType::kHostBuiltinForDMA) {
     // Request the index buffer memory.
     // TODO(Triang3l): Shared memory request cache.
+    if (cvars::d3d12_reupload_vertex_data) {
+      shared_memory_.ForceReuploadCpuRange(guest_index_base,
+                                           guest_index_buffer_needed_bytes);
+    }
     if (!shared_memory_.RequestRange(guest_index_base,
                                      guest_index_buffer_needed_bytes)) {
       XELOGE(
@@ -1478,7 +1483,8 @@ PrimitiveProcessor::CacheTransaction::CacheTransaction(
     PrimitiveProcessor& processor, CacheKey key)
     : processor_(processor), key_(key) {
   assert_zero(processor_.cache_currently_processing_size_bytes_);
-  if (cvars::primitive_processor_cache_min_indices < 0 ||
+  if (cvars::d3d12_reupload_vertex_data ||
+      cvars::primitive_processor_cache_min_indices < 0 ||
       key_.count < uint32_t(cvars::primitive_processor_cache_min_indices)) {
     // Don't cache if the vertex count is too small.
     key_.key = 0;

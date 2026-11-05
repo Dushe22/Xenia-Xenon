@@ -17,6 +17,7 @@ DECLARE_bool(trace_rolling_capture);
 DECLARE_int32(trace_rolling_capture_keyframe_frames);
 DECLARE_int32(trace_rolling_capture_max_mb);
 DECLARE_int32(gpu_wait_timeout_ms);
+DECLARE_bool(d3d12_reupload_vertex_data);
 DECLARE_string(trace_gpu_frames);
 
 DECLARE_path(dump_shaders);
