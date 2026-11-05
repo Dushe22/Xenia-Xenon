@@ -368,6 +368,7 @@ inline const std::vector<Category>& Categories() {
           Toggle("Shader depth fix", "d3d12_shader_depth_fix"),
           Toggle("Reupload vertex data", "d3d12_reupload_vertex_data",
                  "Lowers performance. For testing stretched polygons."),
+          Toggle("Pad vertex constants", "d3d12_pad_vertex_constants"),
           Toggle("Continuous capture", "trace_rolling_capture",
                  "Lowers performance. Leave it off unless you are capturing a "
                  "glitch."),
@@ -576,6 +577,10 @@ inline const std::vector<Category>& Categories() {
          "Copies the vertex data from game memory again for every draw. Turn "
          "it on if stretched polygons or random lines appear, to check whether "
          "the GPU is using outdated data."},
+        {"d3d12_pad_vertex_constants",
+         "Makes shaders that read past their constants get zeros instead of "
+         "leftover memory. Turn it on if random stretched polygons or lines "
+         "appear."},
         {"d3d12_shader_depth_fix",
          "Fixes see-through or invisible characters in some games, such as WWE "
          "13. Restart the game after changing it."},

@@ -34,6 +34,12 @@
 
 DECLARE_bool(d3d12_debug);
 
+DEFINE_bool(d3d12_pad_vertex_constants, false,
+            "Put 256 zero constants after the vertex shader float constants, "
+            "so shaders that index constants past the end (for example with "
+            "bad bone indices) read zeros on every GPU instead of whatever "
+            "memory follows. Tests for random stretched polygons.",
+            "D3D12");
 DEFINE_bool(d3d12_bindless, true,
             "Use bindless resources where available - may improve performance, "
             "but may make debugging more complicated.",
@@ -5324,13 +5330,26 @@ bool D3D12CommandProcessor::UpdateBindings(const D3D12Shader* vertex_shader,
     // still be provided, so if the first draw in the frame with the current
     // root signature doesn't have float constants at all, still allocate an
     // empty buffer.
+    // A full set of 256 means dynamic indexing is possible. Root CBVs aren't
+    // bounds-checked, so reads past the end would get unrelated memory.
+    uint32_t float_constant_padding_vertex =
+        (cvars::d3d12_pad_vertex_constants &&
+         float_constant_count_vertex >= 256)
+            ? 256
+            : 0;
     uint8_t* float_constants = constant_buffer_pool_->Request(
         frame_current_,
-        sizeof(float) * 4 * std::max(float_constant_count_vertex, uint32_t(1)),
+        sizeof(float) * 4 *
+            (std::max(float_constant_count_vertex, uint32_t(1)) +
+             float_constant_padding_vertex),
         D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT, nullptr, nullptr,
         &cbuffer_binding_float_vertex_.address);
     if (float_constants == nullptr) {
       return false;
+    }
+    if (float_constant_padding_vertex) {
+      std::memset(float_constants + sizeof(float) * 4 * float_constant_count_vertex,
+                  0, sizeof(float) * 4 * float_constant_padding_vertex);
     }
     for (uint32_t i = 0; i < 4; ++i) {
       uint64_t float_constant_map_entry =
