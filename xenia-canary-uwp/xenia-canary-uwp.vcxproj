@@ -277,6 +277,9 @@
     <None Include="Assets\game_configs\545108B4.config.toml">
       <DeploymentContent>true</DeploymentContent>
     </None>
+    <None Include="Assets\game_configs\545408B2.config.toml">
+      <DeploymentContent>true</DeploymentContent>
+    </None>
     <None Include="Assets\fonts\SpaceGrotesk-Regular.ttf">
       <DeploymentContent>true</DeploymentContent>
     </None>
