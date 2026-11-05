@@ -1,0 +1,11 @@
+# WWE 2K14 (545408B2)
+#
+# Same engine as WWE '13 (545108B4). Ranged physical allocations fail
+# because of Xenia's 4 KB heap offset, the same way as in WWE '13.
+
+[Memory]
+ignore_offset_for_ranged_allocations = true
+
+[GPU]
+# Asynchronous shader compilation takes CPU time from the emulator on Xbox.
+async_shader_compilation = false
