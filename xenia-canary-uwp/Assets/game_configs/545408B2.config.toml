@@ -9,3 +9,6 @@ ignore_offset_for_ranged_allocations = true
 [GPU]
 # Asynchronous shader compilation takes CPU time from the emulator on Xbox.
 async_shader_compilation = false
+# Some attire textures (such as Bobby Heenan's) are built on the GPU and read
+# back by the CPU. Without readback they come out black with magenta patches.
+readback_resolve = "fast"
