@@ -15,6 +15,7 @@
 #include "xenia/base/math.h"
 #include "xenia/base/profiling.h"
 #include "xenia/gpu/gpu_flags.h"
+#include "xenia/gpu/perf_stats.h"
 #include "xenia/gpu/shared_memory.h"
 
 #include <sstream>
@@ -906,6 +907,7 @@ bool TextureCache::LoadTextureData(Texture& texture) {
   if (!texture.base_outdated_lockless() && !texture.mips_outdated_lockless()) {
     return true;
   }
+  perf::ScopedTimer load_timer(perf::kTextureLoadNs, perf::kTextureLoadCount);
 
   // Check what needs to be uploaded.
   bool base_outdated, mips_outdated;

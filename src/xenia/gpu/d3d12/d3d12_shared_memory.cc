@@ -8,6 +8,7 @@
  */
 
 #include "xenia/gpu/d3d12/d3d12_shared_memory.h"
+#include "xenia/gpu/perf_stats.h"
 
 #include <cstring>
 
@@ -368,6 +369,7 @@ bool D3D12SharedMemory::UploadRanges(
       }
       MakeRangeValid(upload_range_start << page_size_log2(),
                      uint32_t(upload_buffer_size), false);
+      perf::Add(perf::kUploadBytes, upload_buffer_size);
 
       if (upload_buffer_size < (1ULL << 32) && upload_buffer_size > 8192) {
         memory::vastcpy(

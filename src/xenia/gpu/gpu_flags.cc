@@ -29,6 +29,11 @@ DEFINE_bool(d3d12_reupload_vertex_data, false,
             "copies on the GPU. Tests for stretched polygons caused by stale "
             "geometry. Costs performance.",
             "D3D12");
+DEFINE_int32(perf_log_interval, 0,
+             "Every this many seconds, log where emulation time goes: frame "
+             "rate, GPU thread waits, pipeline and texture work, uploads and "
+             "process CPU use. 0 disables it.",
+             "GPU.Debug");
 DEFINE_int32(gpu_wait_timeout_ms, 0,
              "Give up on a GPU wait (WAIT_REG_MEM) after this many ms and log "
              "it. 0 waits forever. For trace replays, where the CPU side that "

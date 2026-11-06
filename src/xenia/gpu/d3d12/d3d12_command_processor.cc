@@ -28,6 +28,7 @@
 #include "xenia/gpu/registers.h"
 #include "xenia/gpu/xenos.h"
 #include "xenia/gpu/xenos_zpd_report.h"
+#include "xenia/gpu/perf_stats.h"
 #include "xenia/kernel/kernel_state.h"
 #include "xenia/ui/d3d12/d3d12_presenter.h"
 #include "xenia/ui/d3d12/d3d12_util.h"
@@ -2300,6 +2301,74 @@ void D3D12CommandProcessor::OnGammaRampPWLValueWritten() {
   gamma_ramp_pwl_up_to_date_ = false;
 }
 
+void D3D12CommandProcessor::LogPerfStats() {
+  perf::Add(perf::kSwapCount, 1);
+  if (cvars::perf_log_interval <= 0) {
+    return;
+  }
+  uint64_t now = perf::NowNs();
+  if (!perf_log_last_ns_) {
+    perf_log_last_ns_ = now;
+    perf_log_last_cpu_100ns_ = GetProcessCpuTime100ns();
+    for (uint32_t i = 0; i < perf::kCounterCount; ++i) {
+      perf::counters[i].store(0, std::memory_order_relaxed);
+    }
+    return;
+  }
+  uint64_t elapsed_ns = now - perf_log_last_ns_;
+  if (elapsed_ns < uint64_t(cvars::perf_log_interval) * 1000000000ull) {
+    return;
+  }
+  uint64_t c[perf::kCounterCount];
+  for (uint32_t i = 0; i < perf::kCounterCount; ++i) {
+    c[i] = perf::counters[i].exchange(0, std::memory_order_relaxed);
+  }
+  uint64_t cpu_100ns = GetProcessCpuTime100ns();
+  double cpu_cores =
+      double(cpu_100ns - perf_log_last_cpu_100ns_) * 100.0 / double(elapsed_ns);
+  perf_log_last_ns_ = now;
+  perf_log_last_cpu_100ns_ = cpu_100ns;
+  double seconds = double(elapsed_ns) * 1e-9;
+  auto pct = [elapsed_ns](uint64_t ns) {
+    return double(ns) * 100.0 / double(elapsed_ns);
+  };
+  uint64_t gpu_thread_busy_ns = elapsed_ns;
+  for (perf::Counter wait :
+       {perf::kGpuIdleNs, perf::kWaitRegMemNs, perf::kHostGpuWaitNs}) {
+    gpu_thread_busy_ns -= std::min(gpu_thread_busy_ns, c[wait]);
+  }
+  XELOGI(
+      "Perf: {:.1f} fps, {:.0f} draws/frame | GPU thread: busy {:.0f}%, idle "
+      "(waiting for guest) {:.0f}%, WAIT_REG_MEM {:.0f}%, host GPU wait {:.0f}% "
+      "({}x) | pipelines {}x {:.1f} ms | textures {}x {:.1f} ms | upload {:.1f} "
+      "MB/s | readbacks {}/frame | process CPU {:.2f} cores",
+      double(c[perf::kSwapCount]) / seconds,
+      c[perf::kSwapCount]
+          ? double(c[perf::kDrawCount]) / double(c[perf::kSwapCount])
+          : 0.0,
+      pct(gpu_thread_busy_ns), pct(c[perf::kGpuIdleNs]),
+      pct(c[perf::kWaitRegMemNs]), pct(c[perf::kHostGpuWaitNs]),
+      c[perf::kHostGpuWaitCount], c[perf::kPipelineCreateCount],
+      double(c[perf::kPipelineCreateNs]) * 1e-6, c[perf::kTextureLoadCount],
+      double(c[perf::kTextureLoadNs]) * 1e-6,
+      double(c[perf::kUploadBytes]) / (1024.0 * 1024.0) / seconds,
+      c[perf::kSwapCount]
+          ? double(c[perf::kReadbackCount]) / double(c[perf::kSwapCount])
+          : 0.0,
+      cpu_cores);
+}
+
+uint64_t D3D12CommandProcessor::GetProcessCpuTime100ns() {
+  FILETIME creation_time, exit_time, kernel_time, user_time;
+  if (!GetProcessTimes(GetCurrentProcess(), &creation_time, &exit_time,
+                       &kernel_time, &user_time)) {
+    return 0;
+  }
+  return ((uint64_t(kernel_time.dwHighDateTime) << 32) |
+          kernel_time.dwLowDateTime) +
+         ((uint64_t(user_time.dwHighDateTime) << 32) | user_time.dwLowDateTime);
+}
+
 void D3D12CommandProcessor::IssueSwap(uint32_t frontbuffer_ptr,
                                       uint32_t frontbuffer_width,
                                       uint32_t frontbuffer_height) {
@@ -2309,6 +2378,7 @@ void D3D12CommandProcessor::IssueSwap(uint32_t frontbuffer_ptr,
   if (cvars::d3d12_debug) {
     GetD3D12Provider().LogD3D12DebugMessages();
   }
+  LogPerfStats();
 
   ui::Presenter* presenter = graphics_system_->presenter();
   if (!presenter) {
@@ -2678,6 +2748,7 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
                                       uint32_t index_count,
                                       IndexBufferInfo* index_buffer_info,
                                       bool major_mode_explicit) {
+  perf::Add(perf::kDrawCount, 1);
 #if XE_GPU_FINE_GRAINED_DRAW_SCOPES
   SCOPE_profile_cpu_f("gpu");
 #endif  // XE_GPU_FINE_GRAINED_DRAW_SCOPES
@@ -3651,6 +3722,7 @@ bool D3D12CommandProcessor::IssueCopy() {
 }
 XE_NOINLINE
 bool D3D12CommandProcessor::IssueCopy_ReadbackResolvePath() {
+  perf::Add(perf::kReadbackCount, 1);
   uint32_t written_address, written_length;
   reg::RB_COPY_DEST_INFO copy_dest_info;
   bool is_scaled;
@@ -3980,7 +4052,13 @@ void D3D12CommandProcessor::CheckSubmissionCompletion(
     await_submission = GetCurrentSubmission() - 1;
   }
 
-  completion_timeline_->AwaitSubmissionAndUpdateCompleted(await_submission);
+  if (await_submission > GetCompletedSubmission()) {
+    perf::ScopedTimer wait_timer(perf::kHostGpuWaitNs,
+                                 perf::kHostGpuWaitCount);
+    completion_timeline_->AwaitSubmissionAndUpdateCompleted(await_submission);
+  } else {
+    completion_timeline_->AwaitSubmissionAndUpdateCompleted(await_submission);
+  }
 
   const uint64_t completed_submission = GetCompletedSubmission();
 

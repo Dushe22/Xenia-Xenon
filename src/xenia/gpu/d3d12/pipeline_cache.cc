@@ -32,6 +32,7 @@
 #include "xenia/gpu/dxbc.h"
 #include "xenia/gpu/dxbc_shader_translator.h"
 #include "xenia/gpu/gpu_flags.h"
+#include "xenia/gpu/perf_stats.h"
 #include "xenia/gpu/pipeline_util.h"
 #include "xenia/gpu/registers.h"
 #include "xenia/gpu/xenos.h"
@@ -2858,6 +2859,8 @@ void PipelineCache::EnsurePipelineShadersTranslated(
 
 ID3D12PipelineState* PipelineCache::CreateD3D12Pipeline(
     const PipelineRuntimeDescription& runtime_description) {
+  perf::ScopedTimer create_timer(perf::kPipelineCreateNs,
+                                 perf::kPipelineCreateCount);
   const PipelineDescription& description = runtime_description.description;
 
   if (runtime_description.pixel_shader != nullptr) {

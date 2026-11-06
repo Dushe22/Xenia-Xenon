@@ -769,6 +769,7 @@ XE_NOINLINE
 bool COMMAND_PROCESSOR::ExecutePacketType3_WAIT_REG_MEM(
     uint32_t packet, uint32_t count) XE_RESTRICT {
   SCOPE_profile_cpu_f("gpu");
+  perf::ScopedTimer wait_timer(perf::kWaitRegMemNs);
 
   // wait until a register or memory location is a specific value
   uint32_t wait_info = reader_.ReadAndSwap<uint32_t>();
