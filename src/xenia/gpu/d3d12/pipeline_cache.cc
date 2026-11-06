@@ -40,6 +40,12 @@
 
 #include "third_party/fmt/include/fmt/xchar.h"
 
+DEFINE_bool(d3d12_pipeline_library, true,
+            "Save compiled pipelines (shaders) to disk with a Direct3D 12 "
+            "pipeline library, so later runs of a game load them instead of "
+            "compiling them again. Makes starting games and first-time effects "
+            "much faster where compilation is slow, such as on Xbox.",
+            "D3D12");
 DEFINE_bool(d3d12_dxbc_disasm, false,
             "Disassemble DXBC shaders after generation.", "D3D12");
 DEFINE_bool(
@@ -294,6 +300,10 @@ void PipelineCache::InitializeShaderStorage(
   }
   shader_storage_file_flush_needed_ = false;
   pipeline_storage_file_flush_needed_ = false;
+
+  OpenPipelineLibrary(
+      GetShaderStorageLocalRoot(cache_root) /
+      fmt::format("{:08X}{}.lib", title_id, pipeline_config.file_suffix));
 
   // Create the pipelines.
   if (!pipeline_stored_descriptions.empty()) {
@@ -551,6 +561,7 @@ void PipelineCache::InitializeShaderStorage(
 }
 
 void PipelineCache::ShutdownShaderStorage() {
+  ClosePipelineLibrary();
   // Shut down the storage writer (closes files, stops write thread).
   storage_writer_.ShutdownShaderStorage();
   shader_storage_file_flush_needed_ = false;
@@ -559,6 +570,12 @@ void PipelineCache::ShutdownShaderStorage() {
 }
 
 void PipelineCache::EndSubmission() {
+  // Save new pipelines now and then, in case the app is closed without a
+  // clean shutdown.
+  if (pipeline_library_unsaved_count_.load(std::memory_order_relaxed) >=
+      kPipelineLibrarySaveThreshold) {
+    SavePipelineLibrary();
+  }
   if (shader_storage_file_flush_needed_ ||
       pipeline_storage_file_flush_needed_) {
     storage_writer_.RequestFlush(shader_storage_file_flush_needed_,
@@ -3300,11 +3317,48 @@ ID3D12PipelineState* PipelineCache::CreateD3D12Pipeline(
     state_desc.DepthStencilState.StencilEnable = false;
   }
 
-  // Create the D3D12 pipeline state object.
+  // Create the D3D12 pipeline state object, or load it from the pipeline
+  // library. The library checks that the whole description matches, so the
+  // name only needs to be unlikely to collide.
   ID3D12Device* device = command_processor_.GetD3D12Provider().GetDevice();
-  ID3D12PipelineState* state;
-  HRESULT hr =
-      device->CreateGraphicsPipelineState(&state_desc, IID_PPV_ARGS(&state));
+  ID3D12PipelineState* state = nullptr;
+  std::wstring library_name;
+  HRESULT hr = E_FAIL;
+  {
+    std::shared_lock<std::shared_mutex> library_lock(pipeline_library_mutex_);
+    if (pipeline_library_) {
+      uint64_t name_hashes[3] = {
+          XXH3_64bits(&description, sizeof(description)),
+          XXH3_64bits(state_desc.VS.pShaderBytecode,
+                      state_desc.VS.BytecodeLength),
+          state_desc.PS.pShaderBytecode
+              ? XXH3_64bits(state_desc.PS.pShaderBytecode,
+                            state_desc.PS.BytecodeLength)
+              : 0};
+      library_name = fmt::format(
+          L"{:016X}", XXH3_64bits(name_hashes, sizeof(name_hashes)));
+      if (SUCCEEDED(pipeline_library_->LoadGraphicsPipeline(
+              library_name.c_str(), &state_desc, IID_PPV_ARGS(&state)))) {
+        hr = S_OK;
+        pipeline_library_loaded_count_.fetch_add(1,
+                                                 std::memory_order_relaxed);
+      }
+    }
+  }
+  if (!state) {
+    hr = device->CreateGraphicsPipelineState(&state_desc,
+                                             IID_PPV_ARGS(&state));
+    if (SUCCEEDED(hr) && !library_name.empty()) {
+      std::shared_lock<std::shared_mutex> library_lock(
+          pipeline_library_mutex_);
+      if (pipeline_library_ &&
+          SUCCEEDED(pipeline_library_->StorePipeline(library_name.c_str(),
+                                                     state))) {
+        pipeline_library_unsaved_count_.fetch_add(1,
+                                                  std::memory_order_relaxed);
+      }
+    }
+  }
   if (FAILED(hr)) {
     if (runtime_description.pixel_shader != nullptr) {
       XELOGE(
@@ -3335,6 +3389,119 @@ ID3D12PipelineState* PipelineCache::CreateD3D12Pipeline(
   }
   state->SetName(name.c_str());
   return state;
+}
+
+void PipelineCache::OpenPipelineLibrary(const std::filesystem::path& path) {
+  ClosePipelineLibrary();
+  if (!cvars::d3d12_pipeline_library) {
+    return;
+  }
+  ID3D12Device1* device1 = nullptr;
+  if (FAILED(command_processor_.GetD3D12Provider().GetDevice()->QueryInterface(
+          IID_PPV_ARGS(&device1)))) {
+    XELOGW("Pipeline library: ID3D12Device1 not available");
+    return;
+  }
+  std::unique_lock<std::shared_mutex> library_lock(pipeline_library_mutex_);
+  pipeline_library_path_ = path;
+  pipeline_library_blob_.clear();
+  FILE* file = xe::filesystem::OpenFile(path, "rb");
+  if (file) {
+    std::fseek(file, 0, SEEK_END);
+    long size = std::ftell(file);
+    std::fseek(file, 0, SEEK_SET);
+    if (size > 0) {
+      pipeline_library_blob_.resize(size_t(size));
+      if (std::fread(pipeline_library_blob_.data(), 1, size_t(size), file) !=
+          size_t(size)) {
+        pipeline_library_blob_.clear();
+      }
+    }
+    std::fclose(file);
+  }
+  HRESULT hr = E_FAIL;
+  if (!pipeline_library_blob_.empty()) {
+    // The blob must stay alive as long as the library.
+    hr = device1->CreatePipelineLibrary(pipeline_library_blob_.data(),
+                                        pipeline_library_blob_.size(),
+                                        IID_PPV_ARGS(&pipeline_library_));
+    if (FAILED(hr)) {
+      // Usually a driver update - start over.
+      XELOGI("Pipeline library: {} is outdated (0x{:08X}), recreating it",
+             xe::path_to_utf8(path), uint32_t(hr));
+      pipeline_library_blob_.clear();
+      pipeline_library_blob_.shrink_to_fit();
+    }
+  }
+  if (FAILED(hr)) {
+    hr = device1->CreatePipelineLibrary(nullptr, 0,
+                                        IID_PPV_ARGS(&pipeline_library_));
+  }
+  device1->Release();
+  if (FAILED(hr)) {
+    XELOGW("Pipeline library: failed to create (0x{:08X})", uint32_t(hr));
+    pipeline_library_ = nullptr;
+    return;
+  }
+  pipeline_library_unsaved_count_ = 0;
+  pipeline_library_loaded_count_ = 0;
+  XELOGI("Pipeline library: opened {} ({} bytes)", xe::path_to_utf8(path),
+         pipeline_library_blob_.size());
+}
+
+void PipelineCache::SavePipelineLibrary() {
+  std::unique_lock<std::shared_mutex> library_lock(pipeline_library_mutex_);
+  if (!pipeline_library_) {
+    return;
+  }
+  uint32_t unsaved = pipeline_library_unsaved_count_.exchange(0);
+  if (!unsaved) {
+    return;
+  }
+  size_t size = pipeline_library_->GetSerializedSize();
+  std::vector<uint8_t> data(size);
+  if (!size || FAILED(pipeline_library_->Serialize(data.data(), size))) {
+    XELOGW("Pipeline library: failed to serialize");
+    return;
+  }
+  std::error_code ec;
+  std::filesystem::create_directories(pipeline_library_path_.parent_path(),
+                                      ec);
+  std::filesystem::path temp_path = pipeline_library_path_;
+  temp_path += ".tmp";
+  FILE* file = xe::filesystem::OpenFile(temp_path, "wb");
+  if (!file) {
+    XELOGW("Pipeline library: failed to open {} for writing",
+           xe::path_to_utf8(temp_path));
+    return;
+  }
+  bool written = std::fwrite(data.data(), 1, size, file) == size;
+  std::fclose(file);
+  if (!written) {
+    std::filesystem::remove(temp_path, ec);
+    return;
+  }
+  std::filesystem::rename(temp_path, pipeline_library_path_, ec);
+  if (ec) {
+    std::filesystem::remove(pipeline_library_path_, ec);
+    std::filesystem::rename(temp_path, pipeline_library_path_, ec);
+  }
+  XELOGI("Pipeline library: saved {} new pipelines ({} bytes, {} loaded "
+         "from disk so far)",
+         unsaved, size, pipeline_library_loaded_count_.load());
+}
+
+void PipelineCache::ClosePipelineLibrary() {
+  // Pipelines still being created would use the library.
+  AwaitPipelineCompletion();
+  SavePipelineLibrary();
+  std::unique_lock<std::shared_mutex> library_lock(pipeline_library_mutex_);
+  if (pipeline_library_) {
+    pipeline_library_->Release();
+    pipeline_library_ = nullptr;
+  }
+  pipeline_library_blob_.clear();
+  pipeline_library_blob_.shrink_to_fit();
 }
 
 void PipelineCache::CreationThread(size_t thread_index) {

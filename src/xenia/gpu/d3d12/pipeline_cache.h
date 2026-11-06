@@ -19,6 +19,7 @@
 #include <mutex>
 #include <queue>
 #include <set>
+#include <shared_mutex>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -447,6 +448,20 @@ class PipelineCache {
   uint32_t shader_storage_title_id_ = 0;
   std::atomic<bool> shader_storage_file_flush_needed_{false};
   std::atomic<bool> pipeline_storage_file_flush_needed_{false};
+
+  // Direct3D 12 pipeline library with the compiled pipelines of the current
+  // title (d3d12_pipeline_library). Load and store take the lock shared (the
+  // library synchronizes them itself), serialization takes it exclusively.
+  static constexpr uint32_t kPipelineLibrarySaveThreshold = 32;
+  void OpenPipelineLibrary(const std::filesystem::path& path);
+  void SavePipelineLibrary();
+  void ClosePipelineLibrary();
+  std::shared_mutex pipeline_library_mutex_;
+  ID3D12PipelineLibrary* pipeline_library_ = nullptr;
+  std::vector<uint8_t> pipeline_library_blob_;
+  std::filesystem::path pipeline_library_path_;
+  std::atomic<uint32_t> pipeline_library_unsaved_count_{0};
+  std::atomic<uint32_t> pipeline_library_loaded_count_{0};
 
   // Storage writer for shaders and pipelines (owns file handles and storage
   // index).

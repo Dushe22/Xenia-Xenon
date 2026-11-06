@@ -365,6 +365,7 @@ inline const std::vector<Category>& Categories() {
           Toggle("Submit on primary buffer end",
                  "d3d12_submit_on_primary_buffer_end"),
           Toggle("Clear memory page state", "clear_memory_page_state"),
+          Toggle("Shader cache on disk", "d3d12_pipeline_library"),
           Toggle("Shader depth fix", "d3d12_shader_depth_fix"),
           Toggle("Reupload vertex data", "d3d12_reupload_vertex_data",
                  "Lowers performance. For testing stretched polygons."),
@@ -581,6 +582,9 @@ inline const std::vector<Category>& Categories() {
          "Makes shaders that read past their constants get zeros instead of "
          "leftover memory. Turn it on if random stretched polygons or lines "
          "appear."},
+        {"d3d12_pipeline_library",
+         "Saves compiled shaders so games start faster and stutter less the "
+         "next time. Restart the game after changing it."},
         {"d3d12_shader_depth_fix",
          "Fixes see-through or invisible characters in some games, such as WWE "
          "13. Restart the game after changing it."},
