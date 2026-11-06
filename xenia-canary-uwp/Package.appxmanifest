@@ -3,7 +3,7 @@
   <Identity
     Name="XeniaXenon"
     Publisher="CN=DanP142"
-    Version="1.2.4.16" />
+    Version="1.2.4.17" />
   <mp:PhoneIdentity PhoneProductId="1e2c463d-8669-45a3-885e-361c76bd9d1e" PhonePublisherId="00000000-0000-0000-0000-000000000000"/>
   <Properties>
     <DisplayName>Xenia Xenon</DisplayName>

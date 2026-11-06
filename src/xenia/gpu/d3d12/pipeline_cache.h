@@ -449,16 +449,18 @@ class PipelineCache {
   std::atomic<bool> shader_storage_file_flush_needed_{false};
   std::atomic<bool> pipeline_storage_file_flush_needed_{false};
 
-  // Direct3D 12 pipeline library with the compiled pipelines of the current
-  // title (d3d12_pipeline_library). Load and store take the lock shared (the
-  // library synchronizes them itself), serialization takes it exclusively.
+  // Compiled pipelines of the current title saved to disk as per-pipeline
+  // cached blobs (d3d12_pipeline_library). Readers take the lock shared,
+  // inserting takes it exclusively.
   static constexpr uint32_t kPipelineLibrarySaveThreshold = 32;
+  static constexpr uint32_t kPipelineDiskCacheMagic = 0x43535058;  // XPSC
+  static constexpr uint32_t kPipelineDiskCacheVersion = 1;
   void OpenPipelineLibrary(const std::filesystem::path& path);
   void SavePipelineLibrary();
   void ClosePipelineLibrary();
   std::shared_mutex pipeline_library_mutex_;
-  ID3D12PipelineLibrary* pipeline_library_ = nullptr;
-  std::vector<uint8_t> pipeline_library_blob_;
+  std::atomic<bool> pipeline_disk_cache_enabled_{false};
+  std::unordered_map<uint64_t, std::vector<uint8_t>> pipeline_disk_cache_;
   std::filesystem::path pipeline_library_path_;
   std::atomic<uint32_t> pipeline_library_unsaved_count_{0};
   std::atomic<uint32_t> pipeline_library_loaded_count_{0};

@@ -41,10 +41,11 @@
 #include "third_party/fmt/include/fmt/xchar.h"
 
 DEFINE_bool(d3d12_pipeline_library, true,
-            "Save compiled pipelines (shaders) to disk with a Direct3D 12 "
-            "pipeline library, so later runs of a game load them instead of "
-            "compiling them again. Makes starting games and first-time effects "
-            "much faster where compilation is slow, such as on Xbox.",
+            "Save compiled pipelines (shaders) to disk, so later runs of a "
+            "game load them instead of compiling them again. Makes starting "
+            "games and first-time effects much faster where compilation is "
+            "slow, such as on Xbox. Uses per-pipeline cached blobs "
+            "(GetCachedBlob / CachedPSO) when the driver supports them.",
             "D3D12");
 DEFINE_bool(d3d12_dxbc_disasm, false,
             "Disassemble DXBC shaders after generation.", "D3D12");
@@ -303,7 +304,7 @@ void PipelineCache::InitializeShaderStorage(
 
   OpenPipelineLibrary(
       GetShaderStorageLocalRoot(cache_root) /
-      fmt::format("{:08X}{}.lib", title_id, pipeline_config.file_suffix));
+      fmt::format("{:08X}{}.psocache", title_id, pipeline_config.file_suffix));
 
   // Create the pipelines.
   if (!pipeline_stored_descriptions.empty()) {
@@ -3317,43 +3318,67 @@ ID3D12PipelineState* PipelineCache::CreateD3D12Pipeline(
     state_desc.DepthStencilState.StencilEnable = false;
   }
 
-  // Create the D3D12 pipeline state object, or load it from the pipeline
-  // library. The library checks that the whole description matches, so the
-  // name only needs to be unlikely to collide.
+  // Create the D3D12 pipeline state object, from a cached blob of an earlier
+  // run if there's one. The driver checks that the blob matches the
+  // description, so the key only needs to be unlikely to collide.
   ID3D12Device* device = command_processor_.GetD3D12Provider().GetDevice();
   ID3D12PipelineState* state = nullptr;
-  std::wstring library_name;
   HRESULT hr = E_FAIL;
-  {
-    std::shared_lock<std::shared_mutex> library_lock(pipeline_library_mutex_);
-    if (pipeline_library_) {
-      uint64_t name_hashes[3] = {
-          XXH3_64bits(&description, sizeof(description)),
-          XXH3_64bits(state_desc.VS.pShaderBytecode,
-                      state_desc.VS.BytecodeLength),
-          state_desc.PS.pShaderBytecode
-              ? XXH3_64bits(state_desc.PS.pShaderBytecode,
-                            state_desc.PS.BytecodeLength)
-              : 0};
-      library_name = fmt::format(
-          L"{:016X}", XXH3_64bits(name_hashes, sizeof(name_hashes)));
-      if (SUCCEEDED(pipeline_library_->LoadGraphicsPipeline(
-              library_name.c_str(), &state_desc, IID_PPV_ARGS(&state)))) {
-        hr = S_OK;
+  uint64_t disk_cache_key = 0;
+  bool store_in_disk_cache = false;
+  if (pipeline_disk_cache_enabled_.load(std::memory_order_acquire)) {
+    uint64_t key_hashes[3] = {
+        XXH3_64bits(&description, sizeof(description)),
+        XXH3_64bits(state_desc.VS.pShaderBytecode,
+                    state_desc.VS.BytecodeLength),
+        state_desc.PS.pShaderBytecode
+            ? XXH3_64bits(state_desc.PS.pShaderBytecode,
+                          state_desc.PS.BytecodeLength)
+            : 0};
+    disk_cache_key = XXH3_64bits(key_hashes, sizeof(key_hashes));
+    store_in_disk_cache = true;
+    // Entries are never removed while pipelines are being created, and
+    // inserting doesn't move existing vectors, so the data can be used
+    // outside the lock.
+    const std::vector<uint8_t>* cached_blob = nullptr;
+    {
+      std::shared_lock<std::shared_mutex> lock(pipeline_library_mutex_);
+      auto it = pipeline_disk_cache_.find(disk_cache_key);
+      if (it != pipeline_disk_cache_.end()) {
+        cached_blob = &it->second;
+      }
+    }
+    if (cached_blob) {
+      state_desc.CachedPSO.pCachedBlob = cached_blob->data();
+      state_desc.CachedPSO.CachedBlobSizeInBytes = cached_blob->size();
+      hr = device->CreateGraphicsPipelineState(&state_desc,
+                                               IID_PPV_ARGS(&state));
+      state_desc.CachedPSO.pCachedBlob = nullptr;
+      state_desc.CachedPSO.CachedBlobSizeInBytes = 0;
+      if (SUCCEEDED(hr)) {
+        store_in_disk_cache = false;
         pipeline_library_loaded_count_.fetch_add(1,
                                                  std::memory_order_relaxed);
+      } else {
+        // Outdated blob (driver update) - compile and replace it.
+        state = nullptr;
       }
     }
   }
   if (!state) {
     hr = device->CreateGraphicsPipelineState(&state_desc,
                                              IID_PPV_ARGS(&state));
-    if (SUCCEEDED(hr) && !library_name.empty()) {
-      std::shared_lock<std::shared_mutex> library_lock(
-          pipeline_library_mutex_);
-      if (pipeline_library_ &&
-          SUCCEEDED(pipeline_library_->StorePipeline(library_name.c_str(),
-                                                     state))) {
+    if (SUCCEEDED(hr) && store_in_disk_cache) {
+      ID3DBlob* blob = nullptr;
+      if (SUCCEEDED(state->GetCachedBlob(&blob)) && blob) {
+        const uint8_t* blob_data =
+            static_cast<const uint8_t*>(blob->GetBufferPointer());
+        std::vector<uint8_t> blob_copy(blob_data,
+                                       blob_data + blob->GetBufferSize());
+        blob->Release();
+        std::unique_lock<std::shared_mutex> lock(pipeline_library_mutex_);
+        pipeline_disk_cache_.insert_or_assign(disk_cache_key,
+                                              std::move(blob_copy));
         pipeline_library_unsaved_count_.fetch_add(1,
                                                   std::memory_order_relaxed);
       }
@@ -3396,73 +3421,83 @@ void PipelineCache::OpenPipelineLibrary(const std::filesystem::path& path) {
   if (!cvars::d3d12_pipeline_library) {
     return;
   }
-  ID3D12Device1* device1 = nullptr;
-  if (FAILED(command_processor_.GetD3D12Provider().GetDevice()->QueryInterface(
-          IID_PPV_ARGS(&device1)))) {
-    XELOGW("Pipeline library: ID3D12Device1 not available");
+  // ID3D12PipelineLibrary removes the device on the Xbox, so only per-pipeline
+  // cached blobs are used, and only if the driver reports support for them.
+  D3D12_FEATURE_DATA_SHADER_CACHE shader_cache = {};
+  if (FAILED(command_processor_.GetD3D12Provider().GetDevice()
+                 ->CheckFeatureSupport(D3D12_FEATURE_SHADER_CACHE,
+                                       &shader_cache, sizeof(shader_cache)))) {
+    XELOGW("Pipeline disk cache: can't query shader cache support");
     return;
   }
-  std::unique_lock<std::shared_mutex> library_lock(pipeline_library_mutex_);
+  XELOGI("Pipeline disk cache: driver shader cache support flags 0x{:X}",
+         uint32_t(shader_cache.SupportFlags));
+  if (!(shader_cache.SupportFlags & D3D12_SHADER_CACHE_SUPPORT_SINGLE_PSO)) {
+    XELOGI("Pipeline disk cache: cached pipeline blobs not supported");
+    return;
+  }
+  std::unique_lock<std::shared_mutex> lock(pipeline_library_mutex_);
   pipeline_library_path_ = path;
-  pipeline_library_blob_.clear();
+  pipeline_disk_cache_.clear();
+  pipeline_library_unsaved_count_ = 0;
+  pipeline_library_loaded_count_ = 0;
   FILE* file = xe::filesystem::OpenFile(path, "rb");
   if (file) {
-    std::fseek(file, 0, SEEK_END);
-    long size = std::ftell(file);
-    std::fseek(file, 0, SEEK_SET);
-    if (size > 0) {
-      pipeline_library_blob_.resize(size_t(size));
-      if (std::fread(pipeline_library_blob_.data(), 1, size_t(size), file) !=
-          size_t(size)) {
-        pipeline_library_blob_.clear();
+    uint32_t header[3];
+    if (std::fread(header, sizeof(header), 1, file) == 1 &&
+        header[0] == kPipelineDiskCacheMagic &&
+        header[1] == kPipelineDiskCacheVersion) {
+      for (uint32_t i = 0; i < header[2]; ++i) {
+        uint64_t key;
+        uint32_t size;
+        if (std::fread(&key, sizeof(key), 1, file) != 1 ||
+            std::fread(&size, sizeof(size), 1, file) != 1 || !size ||
+            size > (64u << 20)) {
+          break;
+        }
+        std::vector<uint8_t> blob(size);
+        if (std::fread(blob.data(), 1, size, file) != size) {
+          break;
+        }
+        pipeline_disk_cache_.insert_or_assign(key, std::move(blob));
       }
     }
     std::fclose(file);
   }
-  HRESULT hr = E_FAIL;
-  if (!pipeline_library_blob_.empty()) {
-    // The blob must stay alive as long as the library.
-    hr = device1->CreatePipelineLibrary(pipeline_library_blob_.data(),
-                                        pipeline_library_blob_.size(),
-                                        IID_PPV_ARGS(&pipeline_library_));
-    if (FAILED(hr)) {
-      // Usually a driver update - start over.
-      XELOGI("Pipeline library: {} is outdated (0x{:08X}), recreating it",
-             xe::path_to_utf8(path), uint32_t(hr));
-      pipeline_library_blob_.clear();
-      pipeline_library_blob_.shrink_to_fit();
-    }
-  }
-  if (FAILED(hr)) {
-    hr = device1->CreatePipelineLibrary(nullptr, 0,
-                                        IID_PPV_ARGS(&pipeline_library_));
-  }
-  device1->Release();
-  if (FAILED(hr)) {
-    XELOGW("Pipeline library: failed to create (0x{:08X})", uint32_t(hr));
-    pipeline_library_ = nullptr;
-    return;
-  }
-  pipeline_library_unsaved_count_ = 0;
-  pipeline_library_loaded_count_ = 0;
-  XELOGI("Pipeline library: opened {} ({} bytes)", xe::path_to_utf8(path),
-         pipeline_library_blob_.size());
+  pipeline_disk_cache_enabled_.store(true, std::memory_order_release);
+  XELOGI("Pipeline disk cache: opened {} ({} pipelines)",
+         xe::path_to_utf8(path), pipeline_disk_cache_.size());
 }
 
 void PipelineCache::SavePipelineLibrary() {
-  std::unique_lock<std::shared_mutex> library_lock(pipeline_library_mutex_);
-  if (!pipeline_library_) {
+  if (!pipeline_disk_cache_enabled_.load(std::memory_order_acquire)) {
     return;
   }
   uint32_t unsaved = pipeline_library_unsaved_count_.exchange(0);
   if (!unsaved) {
     return;
   }
-  size_t size = pipeline_library_->GetSerializedSize();
-  std::vector<uint8_t> data(size);
-  if (!size || FAILED(pipeline_library_->Serialize(data.data(), size))) {
-    XELOGW("Pipeline library: failed to serialize");
-    return;
+  std::vector<uint8_t> data;
+  {
+    std::shared_lock<std::shared_mutex> lock(pipeline_library_mutex_);
+    size_t size = sizeof(uint32_t) * 3;
+    for (const auto& entry : pipeline_disk_cache_) {
+      size += sizeof(uint64_t) + sizeof(uint32_t) + entry.second.size();
+    }
+    data.reserve(size);
+    auto append = [&data](const void* source, size_t source_size) {
+      const uint8_t* bytes = static_cast<const uint8_t*>(source);
+      data.insert(data.end(), bytes, bytes + source_size);
+    };
+    uint32_t header[3] = {kPipelineDiskCacheMagic, kPipelineDiskCacheVersion,
+                          uint32_t(pipeline_disk_cache_.size())};
+    append(header, sizeof(header));
+    for (const auto& entry : pipeline_disk_cache_) {
+      uint32_t blob_size = uint32_t(entry.second.size());
+      append(&entry.first, sizeof(entry.first));
+      append(&blob_size, sizeof(blob_size));
+      append(entry.second.data(), entry.second.size());
+    }
   }
   std::error_code ec;
   std::filesystem::create_directories(pipeline_library_path_.parent_path(),
@@ -3471,11 +3506,11 @@ void PipelineCache::SavePipelineLibrary() {
   temp_path += ".tmp";
   FILE* file = xe::filesystem::OpenFile(temp_path, "wb");
   if (!file) {
-    XELOGW("Pipeline library: failed to open {} for writing",
+    XELOGW("Pipeline disk cache: failed to open {} for writing",
            xe::path_to_utf8(temp_path));
     return;
   }
-  bool written = std::fwrite(data.data(), 1, size, file) == size;
+  bool written = std::fwrite(data.data(), 1, data.size(), file) == data.size();
   std::fclose(file);
   if (!written) {
     std::filesystem::remove(temp_path, ec);
@@ -3486,22 +3521,22 @@ void PipelineCache::SavePipelineLibrary() {
     std::filesystem::remove(pipeline_library_path_, ec);
     std::filesystem::rename(temp_path, pipeline_library_path_, ec);
   }
-  XELOGI("Pipeline library: saved {} new pipelines ({} bytes, {} loaded "
-         "from disk so far)",
-         unsaved, size, pipeline_library_loaded_count_.load());
+  XELOGI(
+      "Pipeline disk cache: saved {} new pipelines ({} bytes, {} loaded from "
+      "disk so far)",
+      unsaved, data.size(), pipeline_library_loaded_count_.load());
 }
 
 void PipelineCache::ClosePipelineLibrary() {
-  // Pipelines still being created would use the library.
+  if (!pipeline_disk_cache_enabled_.load(std::memory_order_acquire)) {
+    return;
+  }
+  // Pipelines still being created would use the cache.
   AwaitPipelineCompletion();
   SavePipelineLibrary();
-  std::unique_lock<std::shared_mutex> library_lock(pipeline_library_mutex_);
-  if (pipeline_library_) {
-    pipeline_library_->Release();
-    pipeline_library_ = nullptr;
-  }
-  pipeline_library_blob_.clear();
-  pipeline_library_blob_.shrink_to_fit();
+  pipeline_disk_cache_enabled_.store(false, std::memory_order_release);
+  std::unique_lock<std::shared_mutex> lock(pipeline_library_mutex_);
+  pipeline_disk_cache_.clear();
 }
 
 void PipelineCache::CreationThread(size_t thread_index) {
