@@ -9,7 +9,9 @@
 
 #include "xenia/kernel/xam/content_manager.h"
 
+#include <algorithm>
 #include <array>
+#include <cerrno>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -90,20 +92,56 @@ class BufferedMappedMemory : public MappedMemory {
   std::vector<uint8_t> buffer_;
 };
 
-std::unique_ptr<MappedMemory> OpenBuffered(const std::filesystem::path& path) {
-  FILE* file = xe::filesystem::OpenFile(path, "rb");
-  if (!file) {
+std::unique_ptr<MappedMemory> OpenBufferedOnce(
+    const std::filesystem::path& path) {
+  std::error_code error;
+  const uintmax_t size = std::filesystem::file_size(path, error);
+  if (error) {
+    XELOGE("Buffered package read: can't get the size of {}: {}", path,
+           error.message());
     return nullptr;
   }
-  std::vector<uint8_t> buffer(
-      static_cast<size_t>(std::filesystem::file_size(path)));
-  const size_t read = fread(buffer.data(), 1, buffer.size(), file);
+  std::vector<uint8_t> buffer;
+  try {
+    buffer.resize(static_cast<size_t>(size));
+  } catch (const std::bad_alloc&) {
+    XELOGE("Buffered package read: not enough memory for {} MB to read {}",
+           size >> 20, path);
+    return nullptr;
+  }
+  FILE* file = xe::filesystem::OpenFile(path, "rb");
+  if (!file) {
+    XELOGE("Buffered package read: can't open {}: errno {}", path, errno);
+    return nullptr;
+  }
+  // Read in parts, a single large read may come back short.
+  size_t read = 0;
+  while (read < buffer.size()) {
+    size_t part = std::min(buffer.size() - read, size_t(16) << 20);
+    size_t part_read = fread(buffer.data() + read, 1, part, file);
+    read += part_read;
+    if (part_read != part) {
+      break;
+    }
+  }
+  const bool read_error = ferror(file) != 0;
   fclose(file);
   if (read != buffer.size()) {
+    XELOGE("Buffered package read: read {} of {} bytes of {}{}", read,
+           buffer.size(), path, read_error ? " (read error)" : "");
     return nullptr;
   }
   XELOGW("Falling back to buffered package read for {}", path);
   return std::make_unique<BufferedMappedMemory>(std::move(buffer));
+}
+
+std::unique_ptr<MappedMemory> OpenBuffered(const std::filesystem::path& path) {
+  for (int attempt = 0; attempt < 3; ++attempt) {
+    if (auto memory = OpenBufferedOnce(path)) {
+      return memory;
+    }
+  }
+  return nullptr;
 }
 }  // namespace
 #endif  // XE_PLATFORM_WINRT
@@ -117,7 +155,14 @@ bool ContentPackageContainer::LoadPackage(
 
   package_ = xe::MappedMemory::Open(package_path, open_mode);
 #if XE_PLATFORM_WINRT
-  if (!package_ && open_mode == MappedMemory::Mode::kRead) {
+  if (!package_) {
+    // Also for packages opened for writing (those not marked read-only, such
+    // as some DLC): without this they failed to mount. Writes to a buffered
+    // package are not saved to the file.
+    if (open_mode != MappedMemory::Mode::kRead) {
+      XELOGW("Package {} can't be mapped for writing, opening it read-only",
+             package_path);
+    }
     package_ = OpenBuffered(package_path);
   }
 #endif
