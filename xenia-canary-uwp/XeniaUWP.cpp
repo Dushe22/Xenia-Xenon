@@ -357,6 +357,25 @@ void RecurseFolderForGames(std::string path) {
     }
     s_scanned_paths.push_back(normalized_directory);
 
+    // A folder with a default.xex is an extracted game. Its other files
+    // (videos, archives) and subfolders aren't games, and checking each of
+    // them is slow and gives false matches (such as a .bik2 video whose last
+    // bytes look like a ZAR footer).
+    {
+      std::error_code ec;
+      std::filesystem::path default_xex =
+          std::filesystem::path(path) / "default.xex";
+      if (std::filesystem::is_regular_file(default_xex, ec)) {
+        const auto signature = xe::GetFileSignature(default_xex);
+        if (signature == xe::Emulator::FileSignatureType::XEX1 ||
+            signature == xe::Emulator::FileSignatureType::XEX2) {
+          AddGameEntry(default_xex,
+                       std::filesystem::path(path).filename().string());
+          return;
+        }
+      }
+    }
+
     std::filesystem::path loose_xex_path;
     std::string loose_xex_name;
     bool has_loose_xex = false;
@@ -392,8 +411,12 @@ void RecurseFolderForGames(std::string path) {
         case xe::Emulator::FileSignatureType::CON:
         case xe::Emulator::FileSignatureType::PIRS:
         case xe::Emulator::FileSignatureType::ZAR: {
-          if (signature != xe::Emulator::FileSignatureType::ZAR &&
-              !IsLaunchableStfsPackage(file.path())) {
+          if (signature == xe::Emulator::FileSignatureType::ZAR) {
+            // The ZAR footer check alone matches some unrelated files.
+            if (_stricmp(file.path().extension().string().c_str(), ".zar")) {
+              break;
+            }
+          } else if (!IsLaunchableStfsPackage(file.path())) {
             break;
           }
           std::string filename = file.path().stem().string();

@@ -266,7 +266,7 @@ namespace app {
 
 // Lets the right stick scroll the current window (frontend pages).
 static xe::app::xenon_settings::State* g_xenon_active_page_state = nullptr;
-static constexpr char kXenonVersion[] = "1.2.4.21";
+static constexpr char kXenonVersion[] = "1.2.4.22";
 static bool g_xenon_pergame_on_right = false;
 
 static void XenonGamepadScroll() {
@@ -4323,6 +4323,9 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
                                   "copy games here.")),
                   urls.front());
             }
+            hint += "\n";
+            hint += Tr("Or play from a USB drive: Storage > Game folders > "
+                       "Add folder.");
             page_draw_list->AddText(ui_font, 26.0f * s, ImVec2(x, y), kDimColor,
                                     hint.c_str());
           } else {
