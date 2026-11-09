@@ -266,7 +266,7 @@ namespace app {
 
 // Lets the right stick scroll the current window (frontend pages).
 static xe::app::xenon_settings::State* g_xenon_active_page_state = nullptr;
-static constexpr char kXenonVersion[] = "1.2.4.20";
+static constexpr char kXenonVersion[] = "1.2.4.21";
 static bool g_xenon_pergame_on_right = false;
 
 static void XenonGamepadScroll() {
@@ -1243,24 +1243,68 @@ void EmulatorWindow::InstallContent() {
 #endif
 }
 
-void EmulatorWindow::InstallContentForTitle(
+std::string EmulatorWindow::InstallContentForTitle(
     const std::string& title_id, const std::filesystem::path& storage_root,
     DlcInstallMode mode) {
 #if XE_PLATFORM_WINRT
-  try {
-    InstallContent();
-  } catch (const std::exception& e) {
-    XELOGE("InstallContentForTitle: exception: {}", e.what());
-    throw;
-  } catch (...) {
-    XELOGE("InstallContentForTitle: unknown exception");
-    throw;
+  (void)mode;
+  // There's no file picker on the console. Install every package (DLC, title
+  // updates) copied to one of these folders, with any subfolders, such as the
+  // 00000002 folder of a content dump:
+  //   <Xenia data>/<title ID>  and  <Games storage>/dlc/<title ID>
+  std::vector<std::filesystem::path> package_dirs = {
+      std::filesystem::path(xe::to_path(UWP::GetLocalState())) / title_id,
+      storage_root / "dlc" / title_id,
+  };
+  int installed = 0;
+  int failed = 0;
+  for (const auto& dir : package_dirs) {
+    std::error_code ec;
+    if (!std::filesystem::is_directory(dir, ec)) {
+      continue;
+    }
+    for (auto it = std::filesystem::recursive_directory_iterator(dir, ec);
+         !ec && it != std::filesystem::recursive_directory_iterator();
+         it.increment(ec)) {
+      if (!it->is_regular_file(ec)) {
+        continue;
+      }
+      try {
+        auto abs_path = std::filesystem::absolute(it->path());
+        Emulator::ContentInstallEntry install_entry(abs_path);
+        X_STATUS result =
+            emulator_->InstallContentPackage(abs_path, install_entry);
+        if (result == X_STATUS_SUCCESS) {
+          ++installed;
+          XELOGI("Installed content package {}", xe::path_to_utf8(abs_path));
+        } else {
+          ++failed;
+          XELOGE("Failed to install content package {}: {:08X}",
+                 xe::path_to_utf8(abs_path), result);
+        }
+      } catch (...) {
+        ++failed;
+      }
+    }
   }
+  if (!installed && !failed) {
+    return fmt::format(
+        "No content packages found. Copy the DLC files (for example the "
+        "00000002 folder) to Games/dlc/{} with the web transfer, then try "
+        "again.",
+        title_id);
+  }
+  if (failed) {
+    return fmt::format("Installed {} packages, {} failed (see xenia.log).",
+                       installed, failed);
+  }
+  return fmt::format("Installed {} packages.", installed);
 #else
   (void)title_id;
   (void)storage_root;
   (void)mode;
   InstallContent();
+  return {};
 #endif
 }
 
@@ -5322,9 +5366,14 @@ void EmulatorWindow::WinRTFrontendDialog::OnDraw(ImGuiIO& io) {
             std::string title_id =
                 UWP::GetTitleIdFromPath(selected_game_path_);
             if (!title_id.empty()) {
-              emulator_window_.InstallContentForTitle(
+              std::string message = emulator_window_.InstallContentForTitle(
                   title_id, storage_root,
                   EmulatorWindow::DlcInstallMode::kManual);
+              if (!message.empty()) {
+                action_status_ = message;
+                action_popup_mode_ = ActionPopupMode::kInfo;
+                show_action_status_ = true;
+              }
             } else {
               emulator_window_.InstallContent();
             }

@@ -445,9 +445,10 @@ class EmulatorWindow {
   enum class DlcInstallMode { kManual, kAutoDownload };
 
   void InstallContent();
-  void InstallContentForTitle(const std::string& title_id,
-                              const std::filesystem::path& storage_root,
-                              DlcInstallMode mode);
+  // Returns a message for the user (empty if nothing to report).
+  std::string InstallContentForTitle(const std::string& title_id,
+                                     const std::filesystem::path& storage_root,
+                                     DlcInstallMode mode);
   void ExtractZarchive();
   void CreateZarchive();
   void ShowContentDirectory();
