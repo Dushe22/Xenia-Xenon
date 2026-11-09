@@ -2369,8 +2369,9 @@ void D3D12CommandProcessor::LogPerfStats() {
   XELOGI(
       "Perf draws: {:.2f} us/draw ({:.1f} ms/frame) = primitive {:.2f} + "
       "render targets {:.2f} + pipeline {:.2f} + textures {:.2f} + state "
-      "{:.2f} + bindings {:.2f} + submit {:.2f} | copies {:.1f} ms/frame | "
-      "other GPU thread work {:.1f} ms/frame",
+      "{:.2f} + bindings {:.2f} + submit {:.2f} | copies {:.1f} ms/frame "
+      "(readbacks: resolve {:.1f} + GPU sync {:.1f} + copy to guest {:.1f} "
+      "ms, {:.2f} MB/frame) | other GPU thread work {:.1f} ms/frame",
       per_draw_us(c[perf::kDrawTotalNs]), frame_ms(c[perf::kDrawTotalNs]),
       per_draw_us(c[perf::kDrawPrimitiveNs]),
       per_draw_us(c[perf::kDrawRenderTargetNs]),
@@ -2379,6 +2380,10 @@ void D3D12CommandProcessor::LogPerfStats() {
       per_draw_us(c[perf::kDrawStateNs]),
       per_draw_us(c[perf::kDrawBindingsNs]),
       per_draw_us(c[perf::kDrawSubmitNs]), frame_ms(c[perf::kCopyNs]),
+      frame_ms(c[perf::kReadbackResolveNs]), frame_ms(c[perf::kReadbackSyncNs]),
+      frame_ms(c[perf::kReadbackMemcpyNs]),
+      double(c[perf::kReadbackBytes]) / (1024.0 * 1024.0) /
+          double(std::max(c[perf::kSwapCount], uint64_t(1))),
       frame_ms(gpu_thread_busy_ns -
                std::min(gpu_thread_busy_ns,
                         c[perf::kDrawTotalNs] + c[perf::kCopyNs])));
@@ -3761,10 +3766,14 @@ bool D3D12CommandProcessor::IssueCopy_ReadbackResolvePath() {
   uint32_t written_address, written_length;
   reg::RB_COPY_DEST_INFO copy_dest_info;
   bool is_scaled;
-  if (!render_target_cache_->Resolve(*memory_, *shared_memory_, *texture_cache_,
-                                     written_address, written_length,
-                                     &copy_dest_info, &is_scaled)) {
-    return false;
+  {
+    perf::ScopedTimer resolve_timer(perf::kReadbackResolveNs);
+    if (!render_target_cache_->Resolve(*memory_, *shared_memory_,
+                                       *texture_cache_, written_address,
+                                       written_length, &copy_dest_info,
+                                       &is_scaled)) {
+      return false;
+    }
   }
   if (!written_length) {
     return true;
@@ -4016,19 +4025,20 @@ bool D3D12CommandProcessor::IssueCopy_ReadbackResolvePath() {
         readback_length);
   }
 
-  if (readback_mode != ReadbackResolveMode::kFast) {
+  if (readback_mode != ReadbackResolveMode::kFast || read_cache_miss) {
+    perf::ScopedTimer sync_timer(perf::kReadbackSyncNs);
+    if (read_cache_miss) {
+      // Delayed sync, but the previous buffer doesn't exist - use the current
+      // buffer with a sync as a fallback.
+      read_index = write_index;
+    }
     // Wait for GPU to finish (accurate but slow)
     if (!AwaitAllQueueOperationsCompletion()) {
       return true;
     }
-  } else if (read_cache_miss) {
-    // Delayed sync, but the previous buffer doesn't exist - use the current
-    // buffer with a sync as a fallback.
-    read_index = write_index;
-    if (!AwaitAllQueueOperationsCompletion()) {
-      return true;
-    }
   }
+  perf::ScopedTimer memcpy_timer(perf::kReadbackMemcpyNs);
+  perf::Add(perf::kReadbackBytes, readback_length);
 
   ID3D12Resource* read_source = rb.buffers[read_index];
   if (read_source != nullptr && readback_length <= rb.sizes[read_index]) {

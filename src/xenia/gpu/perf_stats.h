@@ -52,6 +52,12 @@ enum Counter : uint32_t {
   kDrawTotalNs,
   // Resolves (IssueCopy), including readbacks.
   kCopyNs,
+  // Parts of the readback resolves: the resolve itself, waiting for the host
+  // GPU, and copying the data to guest memory.
+  kReadbackResolveNs,
+  kReadbackSyncNs,
+  kReadbackMemcpyNs,
+  kReadbackBytes,
   kCounterCount,
 };
 

@@ -8,7 +8,7 @@ ignore_offset_for_ranged_allocations = true
 
 [GPU]
 # Compile new shaders in the background (objects appear a few frames late)
-# instead of freezing the game on camera changes. Only 2 low-priority threads,
+# instead of freezing the game on camera changes. 4 low-priority threads,
 # so compilation doesn't take CPU time from the emulator.
 async_shader_compilation = true
 # Some attire textures (such as Bobby Heenan's) are built on the GPU and read
@@ -16,4 +16,4 @@ async_shader_compilation = true
 readback_resolve = "fast"
 
 [D3D12]
-d3d12_pipeline_creation_threads = 2
+d3d12_pipeline_creation_threads = 4
