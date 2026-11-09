@@ -73,7 +73,16 @@ bool UWPWindow::OpenImpl() {
   return true; 
 }
 
-void UWPWindow::RequestPaintImpl() { 
+void UWPWindow::RequestPaintImpl() {
+  // Only paint on the UI thread. The guest output thread requests a paint
+  // while holding the presenter's paint mode lock, and painting takes that
+  // lock again: on that thread it threw "resource deadlock would occur" and
+  // closed the app whenever a Xenon dialog was open (such as the profile
+  // sign-in). The UI loop requests a paint on every iteration, so the frame
+  // is still painted right after.
+  if (!app_context().IsInUIThread()) {
+    return;
+  }
   UWP::UpdateImGuiIO();
   OnPaint(); 
 }
