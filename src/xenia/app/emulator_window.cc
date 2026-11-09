@@ -52,6 +52,7 @@
 #include "xenia/gpu/d3d12/d3d12_command_processor.h"
 #include "xenia/gpu/gpu_flags.h"
 #include "xenia/gpu/graphics_system.h"
+#include "xenia/gpu/shader_preload.h"
 #include "xenia/hid/input_system.h"
 #include "xenia/kernel/xam/ui/create_profile_ui.h"
 #include "xenia/kernel/xam/xam_module.h"
@@ -85,6 +86,7 @@
 #include "xenia/ui/d3d12/d3d12_immediate_drawer.h"
 
 DECLARE_bool(debug);
+DECLARE_bool(preload_shaders);
 
 DECLARE_string(hid);
 
@@ -266,7 +268,7 @@ namespace app {
 
 // Lets the right stick scroll the current window (frontend pages).
 static xe::app::xenon_settings::State* g_xenon_active_page_state = nullptr;
-static constexpr char kXenonVersion[] = "1.2.4.34";
+static constexpr char kXenonVersion[] = "1.2.4.35";
 static bool g_xenon_pergame_on_right = false;
 
 static void XenonGamepadScroll() {
@@ -1711,7 +1713,51 @@ void EmulatorWindow::SetInitializingShaderStorage(bool initializing) {
     return;
   }
   initializing_shader_storage_ = initializing;
+  if (initializing && cvars::preload_shaders && !shader_preload_dialog_open_ &&
+      imgui_drawer_) {
+    // Closes itself when the storage is initialized.
+    shader_preload_dialog_open_ = true;
+    new ShaderPreloadDialog(imgui_drawer_.get(), *this);
+  }
   UpdateTitle();
+}
+
+void EmulatorWindow::ShaderPreloadDialog::OnDraw(ImGuiIO& io) {
+  if (!emulator_window_.initializing_shader_storage_) {
+    emulator_window_.shader_preload_dialog_open_ = false;
+    Close();
+    return;
+  }
+  const gpu::ShaderPreloadProgress& progress = gpu::shader_preload_progress();
+  uint32_t total = progress.total.load(std::memory_order_relaxed);
+  uint32_t done =
+      std::min(progress.done.load(std::memory_order_relaxed), total);
+
+  ImGui::SetNextWindowPos(
+      ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f),
+      ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+  ImGui::SetNextWindowSize(
+      ImVec2(std::max(io.DisplaySize.x * 0.4f, 320.0f), 0.0f),
+      ImGuiCond_Always);
+  if (ImGui::Begin("##shader_preload", nullptr,
+                   ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+                       ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
+                       ImGuiWindowFlags_NoSavedSettings |
+                       ImGuiWindowFlags_NoFocusOnAppearing |
+                       ImGuiWindowFlags_NoInputs)) {
+    ImGui::TextUnformatted("Preparing shaders");
+    ImGui::Spacing();
+    if (total) {
+      ImGui::ProgressBar(float(done) / float(total), ImVec2(-1.0f, 0.0f),
+                         fmt::format("{} / {}", done, total).c_str());
+    } else {
+      ImGui::ProgressBar(0.0f, ImVec2(-1.0f, 0.0f), "Loading the cache");
+    }
+    ImGui::Spacing();
+    ImGui::TextDisabled(
+        "The game starts when all the saved shaders are ready.");
+  }
+  ImGui::End();
 }
 
 // Notes:

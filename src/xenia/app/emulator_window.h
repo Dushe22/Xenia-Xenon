@@ -212,6 +212,20 @@ class EmulatorWindow {
         installation_entries_;
   };
 
+  // Shown while the stored pipelines are created before the game starts.
+  class ShaderPreloadDialog final : public ui::ImGuiDialog {
+   public:
+    ShaderPreloadDialog(ui::ImGuiDrawer* imgui_drawer,
+                        EmulatorWindow& emulator_window)
+        : ui::ImGuiDialog(imgui_drawer), emulator_window_(emulator_window) {}
+
+   protected:
+    void OnDraw(ImGuiIO& io) override;
+
+   private:
+    EmulatorWindow& emulator_window_;
+  };
+
   class DisplayConfigDialog final : public ui::ImGuiDialog {
    public:
     DisplayConfigDialog(ui::ImGuiDrawer* imgui_drawer,
@@ -502,6 +516,7 @@ class EmulatorWindow {
 
   std::string base_title_;
   bool initializing_shader_storage_ = false;
+  bool shader_preload_dialog_open_ = false;
 
   std::unique_ptr<DisplayConfigDialog> display_config_dialog_;
 #if XE_PLATFORM_WINRT

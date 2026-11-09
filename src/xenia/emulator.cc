@@ -7,7 +7,10 @@
  ******************************************************************************
  */
 
+#include <atomic>
+#include <chrono>
 #include <ranges>
+#include <thread>
 
 #include "xenia/emulator.h"
 
@@ -21,6 +24,7 @@
 #include "xenia/base/assert.h"
 #include "xenia/base/byte_stream.h"
 #include "xenia/base/clock.h"
+#include "xenia/base/threading.h"
 #include "xenia/base/cvar.h"
 #include "xenia/base/debugging.h"
 #include "xenia/base/exception_handler.h"
@@ -86,6 +90,12 @@ DEFINE_bool(allow_game_relative_writes, false,
             "General");
 
 DECLARE_bool(allow_plugins);
+
+DEFINE_bool(preload_shaders, true,
+            "Create all the pipelines stored for the title before the game "
+            "starts, showing their progress, so the game does not stutter or "
+            "skip drawing things while they are created in the background.",
+            "GPU");
 
 DEFINE_int32(priority_class, 0,
              "Forces Xenia to use different process priority than default one. "
@@ -1822,11 +1832,44 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
   // intro videos, etc.). With async_shader_compilation enabled, draws are
   // skipped until pipelines are ready, so this is safe. By the time actual
   // gameplay starts, most cached pipelines should be compiled.
+  //
+  // With preload_shaders the main thread stays suspended until the stored
+  // pipelines are created: it is resumed by whichever finishes last, the
+  // launch or the pipeline creation.
+  const bool preload_shaders = cvars::preload_shaders && graphics_system_;
+  auto resume_gate =
+      std::make_shared<std::atomic<int>>(preload_shaders ? 2 : 1);
+  auto resume_main_thread = [this, resume_gate]() {
+    if (resume_gate->fetch_sub(1) == 1 && main_thread_) {
+      main_thread_->Resume();
+    }
+  };
   if (graphics_system_) {
+    auto preload_done = std::make_shared<std::atomic<bool>>(false);
     on_shader_storage_initialization(true);
     graphics_system_->InitializeShaderStorage(
         cache_root_, title_id_.value(), false,
-        [this]() { on_shader_storage_initialization(false); });
+        [this, preload_shaders, preload_done, resume_main_thread]() {
+          on_shader_storage_initialization(false);
+          if (preload_shaders && !preload_done->exchange(true)) {
+            resume_main_thread();
+          }
+        });
+    if (preload_shaders) {
+      // Start the game anyway if creating the pipelines takes too long.
+      std::thread([this, preload_done, resume_main_thread]() {
+        for (int i = 0; i < 3000 && !preload_done->load(); ++i) {
+          xe::threading::Sleep(std::chrono::milliseconds(100));
+        }
+        if (!preload_done->exchange(true)) {
+          XELOGW(
+              "Shader preload: still creating pipelines after 5 minutes, "
+              "starting the game");
+          on_shader_storage_initialization(false);
+          resume_main_thread();
+        }
+      }).detach();
+    }
   }
 
   auto main_thread = kernel_state_->LaunchModule(module);
@@ -1847,10 +1890,10 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
     }
   }
 
-  // Resume the main thread now.
+  // Resume the main thread now (or once the pipelines are preloaded).
   // If the debugger has requested a suspend this will just decrement the
   // suspend count without resuming it until the debugger wants.
-  main_thread_->Resume();
+  resume_main_thread();
 
   return X_STATUS_SUCCESS;
 }

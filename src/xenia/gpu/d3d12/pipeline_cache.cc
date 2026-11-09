@@ -28,6 +28,7 @@
 #include "xenia/base/xxhash.h"
 #include "xenia/gpu/d3d12/d3d12_command_processor.h"
 #include "xenia/gpu/d3d12/d3d12_render_target_cache.h"
+#include "xenia/gpu/shader_preload.h"
 #include "xenia/gpu/draw_util.h"
 #include "xenia/gpu/dxbc.h"
 #include "xenia/gpu/dxbc_shader_translator.h"
@@ -270,6 +271,8 @@ void PipelineCache::InitializeShaderStorage(
     const std::filesystem::path& cache_root, uint32_t title_id, bool blocking,
     std::function<void()> completion_callback) {
   ShutdownShaderStorage();
+  shader_preload_progress().total = 0;
+  shader_preload_progress().done = 0;
 
   bool edram_rov_used = render_target_cache_.GetPath() ==
                         RenderTargetCache::Path::kPixelShaderInterlock;
@@ -308,6 +311,10 @@ void PipelineCache::InitializeShaderStorage(
             TranslateShadersForStorage(translations_needed, edram_rov_used);
           },
           pipeline_stored_descriptions)) {
+    // Still report completion, the game may be waiting for it to start.
+    if (completion_callback) {
+      completion_callback();
+    }
     return;
   }
   shader_storage_file_flush_needed_ = false;
@@ -484,6 +491,8 @@ void PipelineCache::InitializeShaderStorage(
           std::lock_guard<xe_mutex> lock(creation_request_lock_);
           creation_queue_.push(new_pipeline);
         }
+        shader_preload_progress().total.fetch_add(1,
+                                                  std::memory_order_relaxed);
         creation_request_cond_.notify_one();
       } else {
         new_pipeline->state.store(
@@ -3652,6 +3661,7 @@ void PipelineCache::CreationThread(size_t thread_index) {
     // Create the D3D12 pipeline state object.
     ID3D12PipelineState* new_state =
         CreateD3D12Pipeline(pipeline_to_create->description);
+    shader_preload_progress().done.fetch_add(1, std::memory_order_relaxed);
 
     // Store the pipeline. If creation failed, state stays nullptr and draws
     // will be skipped.
@@ -3701,6 +3711,7 @@ void PipelineCache::CreateQueuedPipelinesOnProcessorThread() {
 
     ID3D12PipelineState* new_state =
         CreateD3D12Pipeline(pipeline_to_create->description);
+    shader_preload_progress().done.fetch_add(1, std::memory_order_relaxed);
 
     // Store the pipeline. If creation failed, state stays nullptr.
     if (new_state != nullptr) {

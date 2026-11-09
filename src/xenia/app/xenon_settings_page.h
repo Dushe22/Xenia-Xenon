@@ -280,6 +280,7 @@ inline const std::vector<Category>& Categories() {
          {Range("Resolution scale", "draw_resolution_scale_x", 1, 3, 1,
                 "%.0fx"),
           Toggle("V-Sync", "vsync"),
+          Toggle("Preload shaders before starting", "preload_shaders"),
           Range("Framerate limit", "framerate_limit", 0, 240, 1, "%.0f fps",
                 "Off"),
           Pick("Render target path", "render_target_path_d3d12",

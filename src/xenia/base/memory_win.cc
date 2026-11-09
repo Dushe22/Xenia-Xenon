@@ -132,7 +132,7 @@ void* AllocFixed(void* base_address, size_t length,
 #endif
   // Failing to reserve a fixed address is often expected (callers try other
   // addresses), but failing to commit means the process is out of memory.
-  if (!result && (alloc_type & MEM_COMMIT)) {
+  if (!result && alloc_type == MEM_COMMIT) {
     DWORD error = GetLastError();
     MEMORYSTATUSEX status = {sizeof(status)};
     GlobalMemoryStatusEx(&status);
