@@ -48,8 +48,12 @@ enum Counter : uint32_t {
   kDrawTexturesNs,      // Texture requests.
   kDrawStateNs,         // Fixed-function state and system constants.
   kDrawBindingsNs,      // Constant buffers, descriptors, root parameters.
-  kDrawSubmitNs,        // Vertex / index buffers and the host draw.
+  kDrawSubmitNs,        // Index buffer, memexport and the host draw.
   kDrawTotalNs,
+  // Parts of kDrawBindingsNs and of the submission.
+  kDrawBindConstantsNs,    // Root signature and constant buffers.
+  kDrawBindDescriptorsNs,  // Shared memory, texture and sampler descriptors.
+  kDrawVertexBuffersNs,    // Vertex buffers made resident in shared memory.
   // Resolves (IssueCopy), including readbacks.
   kCopyNs,
   // Parts of the readback resolves: the resolve itself, waiting for the host
@@ -108,17 +112,23 @@ class ScopedTimer {
 
 // Splits the time of one draw into phases: each Mark adds the time since the
 // previous mark to a counter; the rest goes to kDrawSubmitNs on destruction.
+// Functions called by the draw can mark phases too through Current().
 class DrawPhases {
  public:
   DrawPhases()
       : enabled_(phases_enabled.load(std::memory_order_relaxed)),
         start_(enabled_ ? NowNs() : 0),
-        last_(start_) {}
+        last_(start_) {
+    if (enabled_) {
+      current_ = this;
+    }
+  }
   ~DrawPhases() {
     if (enabled_) {
       uint64_t now = NowNs();
       Add(kDrawSubmitNs, now - last_);
       Add(kDrawTotalNs, now - start_);
+      current_ = nullptr;
     }
   }
   void Mark(Counter counter) {
@@ -128,14 +138,36 @@ class DrawPhases {
       last_ = now;
     }
   }
+  // Marks a phase of the draw in progress on this thread, if measuring.
+  static void MarkCurrent(Counter counter) {
+    if (current_) {
+      current_->Mark(counter);
+    }
+  }
   DrawPhases(const DrawPhases&) = delete;
   DrawPhases& operator=(const DrawPhases&) = delete;
 
  private:
+  static inline thread_local DrawPhases* current_ = nullptr;
   bool enabled_;
   uint64_t start_;
   uint64_t last_;
 };
+
+// How long reading the clock takes, to know how much the phase measurement
+// itself costs per draw (about 10 clock reads and atomic adds per draw).
+inline double MeasureTimerCostNs() {
+  constexpr int kReads = 1000;
+  uint64_t start = NowNs();
+  uint64_t sink = 0;
+  for (int i = 0; i < kReads; ++i) {
+    sink += NowNs();
+    Add(kSwapCount, 0);
+  }
+  uint64_t end = NowNs();
+  (void)sink;
+  return double(end - start) / kReads;
+}
 
 }  // namespace perf
 }  // namespace gpu

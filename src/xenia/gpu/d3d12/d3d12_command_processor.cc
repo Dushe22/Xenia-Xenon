@@ -2412,7 +2412,9 @@ void D3D12CommandProcessor::LogPerfStats() {
   XELOGI(
       "Perf draws: {:.2f} us/draw ({:.1f} ms/frame) = primitive {:.2f} + "
       "render targets {:.2f} + pipeline {:.2f} + textures {:.2f} + state "
-      "{:.2f} + bindings {:.2f} + submit {:.2f} | copies {:.1f} ms/frame "
+      "{:.2f} + bindings {:.2f} (constants {:.2f}, descriptors {:.2f}, root "
+      "{:.2f}) + vertex buffers {:.2f} + submit {:.2f} (timer {:.0f} ns per "
+      "read) | copies {:.1f} ms/frame "
       "(readbacks: resolve {:.1f} + GPU sync {:.1f} + copy to guest {:.1f} "
       "ms, {:.2f} MB/frame, skipped {:.1f}/frame {:.2f} MB/frame, waiting "
       "for the copy thread {:.1f} ms) | other GPU thread work {:.1f} "
@@ -2423,8 +2425,14 @@ void D3D12CommandProcessor::LogPerfStats() {
       per_draw_us(c[perf::kDrawPipelineNs]),
       per_draw_us(c[perf::kDrawTexturesNs]),
       per_draw_us(c[perf::kDrawStateNs]),
+      per_draw_us(c[perf::kDrawBindConstantsNs] +
+                  c[perf::kDrawBindDescriptorsNs] + c[perf::kDrawBindingsNs]),
+      per_draw_us(c[perf::kDrawBindConstantsNs]),
+      per_draw_us(c[perf::kDrawBindDescriptorsNs]),
       per_draw_us(c[perf::kDrawBindingsNs]),
-      per_draw_us(c[perf::kDrawSubmitNs]), frame_ms(c[perf::kCopyNs]),
+      per_draw_us(c[perf::kDrawVertexBuffersNs]),
+      per_draw_us(c[perf::kDrawSubmitNs]), perf::MeasureTimerCostNs(),
+      frame_ms(c[perf::kCopyNs]),
       frame_ms(c[perf::kReadbackResolveNs]), frame_ms(c[perf::kReadbackSyncNs]),
       frame_ms(c[perf::kReadbackMemcpyNs]),
       double(c[perf::kReadbackBytes]) / (1024.0 * 1024.0) /
@@ -2474,7 +2482,7 @@ void D3D12CommandProcessor::LogThreadCpuUsage(uint64_t elapsed_ns) {
     double percent =
         double(cpu_100ns - last->second) * 100.0 * 100.0 / double(elapsed_ns);
     if (percent >= 5.0) {
-      std::string name = thread->name();
+      std::string name = host_thread->name();
       // Names end with the handle, such as "Main XThread (F8000038)".
       size_t paren = name.rfind(" (");
       if (paren != std::string::npos) {
@@ -3300,6 +3308,7 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
       }
     }
   }
+  draw_phases.Mark(perf::kDrawVertexBuffersNs);
   // Gather memexport ranges and ensure the heaps for them are resident, and
   // also load the data surrounding the export and to fill the regions that
   // won't be modified by the shaders.
@@ -5780,6 +5789,8 @@ bool D3D12CommandProcessor::UpdateBindings(const D3D12Shader* vertex_shader,
         ~(1u << root_parameter_fetch_constants);
   }
 
+  perf::DrawPhases::MarkCurrent(perf::kDrawBindConstantsNs);
+
   //
   // Update descriptors.
   //
@@ -6105,6 +6116,8 @@ bool D3D12CommandProcessor::UpdateBindings(const D3D12Shader* vertex_shader,
       return retval;
     }
   }
+
+  perf::DrawPhases::MarkCurrent(perf::kDrawBindDescriptorsNs);
 
   // Update the root parameters.
   if (!(current_graphics_root_up_to_date_ &
