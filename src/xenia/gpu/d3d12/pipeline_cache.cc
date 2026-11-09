@@ -40,12 +40,13 @@
 
 #include "third_party/fmt/include/fmt/xchar.h"
 
-DEFINE_bool(d3d12_pipeline_library, true,
+DEFINE_bool(d3d12_pipeline_library, false,
             "Save compiled pipelines (shaders) to disk, so later runs of a "
             "game load them instead of compiling them again. Makes starting "
             "games and first-time effects much faster where compilation is "
-            "slow, such as on Xbox. Uses per-pipeline cached blobs "
-            "(GetCachedBlob / CachedPSO) when the driver supports them.",
+            "slow. Uses per-pipeline cached blobs (GetCachedBlob / CachedPSO) "
+            "when the driver supports them. Off by default: on Xbox, using "
+            "the shader cache APIs loses the graphics device.",
             "D3D12");
 DEFINE_bool(d3d12_dxbc_disasm, false,
             "Disassemble DXBC shaders after generation.", "D3D12");
