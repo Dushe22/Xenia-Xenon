@@ -41,8 +41,22 @@ enum Counter : uint32_t {
   kReadbackCount,
   kDrawCount,
   kSwapCount,
+  // Draw phases on the GPU thread (only measured while logging).
+  kDrawPrimitiveNs,     // Setup, shader analysis, primitive processing.
+  kDrawRenderTargetNs,  // Render target cache update.
+  kDrawPipelineNs,      // Pipeline lookup / creation.
+  kDrawTexturesNs,      // Texture requests.
+  kDrawStateNs,         // Fixed-function state and system constants.
+  kDrawBindingsNs,      // Constant buffers, descriptors, root parameters.
+  kDrawSubmitNs,        // Vertex / index buffers and the host draw.
+  kDrawTotalNs,
+  // Resolves (IssueCopy), including readbacks.
+  kCopyNs,
   kCounterCount,
 };
+
+// Set from the perf_log_interval cvar so the hot paths check one bool.
+inline std::atomic<bool> phases_enabled{false};
 
 inline std::atomic<uint64_t> counters[kCounterCount];
 
@@ -78,6 +92,37 @@ class ScopedTimer {
   Counter ns_counter_;
   Counter count_counter_;
   uint64_t start_;
+};
+
+// Splits the time of one draw into phases: each Mark adds the time since the
+// previous mark to a counter; the rest goes to kDrawSubmitNs on destruction.
+class DrawPhases {
+ public:
+  DrawPhases()
+      : enabled_(phases_enabled.load(std::memory_order_relaxed)),
+        start_(enabled_ ? NowNs() : 0),
+        last_(start_) {}
+  ~DrawPhases() {
+    if (enabled_) {
+      uint64_t now = NowNs();
+      Add(kDrawSubmitNs, now - last_);
+      Add(kDrawTotalNs, now - start_);
+    }
+  }
+  void Mark(Counter counter) {
+    if (enabled_) {
+      uint64_t now = NowNs();
+      Add(counter, now - last_);
+      last_ = now;
+    }
+  }
+  DrawPhases(const DrawPhases&) = delete;
+  DrawPhases& operator=(const DrawPhases&) = delete;
+
+ private:
+  bool enabled_;
+  uint64_t start_;
+  uint64_t last_;
 };
 
 }  // namespace perf

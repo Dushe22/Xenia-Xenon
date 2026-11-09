@@ -2303,6 +2303,8 @@ void D3D12CommandProcessor::OnGammaRampPWLValueWritten() {
 
 void D3D12CommandProcessor::LogPerfStats() {
   perf::Add(perf::kSwapCount, 1);
+  perf::phases_enabled.store(cvars::perf_log_interval > 0,
+                             std::memory_order_relaxed);
   if (cvars::perf_log_interval <= 0) {
     return;
   }
@@ -2356,6 +2358,30 @@ void D3D12CommandProcessor::LogPerfStats() {
           ? double(c[perf::kReadbackCount]) / double(c[perf::kSwapCount])
           : 0.0,
       cpu_cores);
+  uint64_t draws = std::max(c[perf::kDrawCount], uint64_t(1));
+  auto per_draw_us = [draws](uint64_t ns) {
+    return double(ns) * 1e-3 / double(draws);
+  };
+  auto frame_ms = [&c](uint64_t ns) {
+    return double(ns) * 1e-6 /
+           double(std::max(c[perf::kSwapCount], uint64_t(1)));
+  };
+  XELOGI(
+      "Perf draws: {:.2f} us/draw ({:.1f} ms/frame) = primitive {:.2f} + "
+      "render targets {:.2f} + pipeline {:.2f} + textures {:.2f} + state "
+      "{:.2f} + bindings {:.2f} + submit {:.2f} | copies {:.1f} ms/frame | "
+      "other GPU thread work {:.1f} ms/frame",
+      per_draw_us(c[perf::kDrawTotalNs]), frame_ms(c[perf::kDrawTotalNs]),
+      per_draw_us(c[perf::kDrawPrimitiveNs]),
+      per_draw_us(c[perf::kDrawRenderTargetNs]),
+      per_draw_us(c[perf::kDrawPipelineNs]),
+      per_draw_us(c[perf::kDrawTexturesNs]),
+      per_draw_us(c[perf::kDrawStateNs]),
+      per_draw_us(c[perf::kDrawBindingsNs]),
+      per_draw_us(c[perf::kDrawSubmitNs]), frame_ms(c[perf::kCopyNs]),
+      frame_ms(gpu_thread_busy_ns -
+               std::min(gpu_thread_busy_ns,
+                        c[perf::kDrawTotalNs] + c[perf::kCopyNs])));
 }
 
 uint64_t D3D12CommandProcessor::GetProcessCpuTime100ns() {
@@ -2749,6 +2775,7 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
                                       IndexBufferInfo* index_buffer_info,
                                       bool major_mode_explicit) {
   perf::Add(perf::kDrawCount, 1);
+  perf::DrawPhases draw_phases;
 #if XE_GPU_FINE_GRAINED_DRAW_SCOPES
   SCOPE_profile_cpu_f("gpu");
 #endif  // XE_GPU_FINE_GRAINED_DRAW_SCOPES
@@ -2837,6 +2864,7 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
   if (!primitive_processor_->Process(primitive_processing_result)) {
     return false;
   }
+  draw_phases.Mark(perf::kDrawPrimitiveNs);
   if (!primitive_processing_result.host_draw_vertex_count) {
     // Nothing to draw.
     return true;
@@ -2902,11 +2930,13 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
       regs, normalized_depth_control, normalized_color_mask, frame_current_);
 
   // Set up the render targets - this may perform dispatches and draws.
+  draw_phases.Mark(perf::kDrawPrimitiveNs);
   if (!render_target_cache_->Update(
           is_rasterization_done, normalized_depth_control,
           normalized_color_mask, *vertex_shader, window_offset_tiles)) {
     return false;
   }
+  draw_phases.Mark(perf::kDrawRenderTargetNs);
 
   // Create the pipeline (for this, need the actually used render target formats
   // from the render target cache), translating the shaders - doing this now to
@@ -2979,12 +3009,14 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
   }
 
   // Update the textures - this may bind pipelines.
+  draw_phases.Mark(perf::kDrawPipelineNs);
   uint32_t used_texture_mask =
       vertex_shader->GetUsedTextureMaskAfterTranslation() |
       (pixel_shader != nullptr
            ? pixel_shader->GetUsedTextureMaskAfterTranslation()
            : 0);
   texture_cache_->RequestTextures(used_texture_mask);
+  draw_phases.Mark(perf::kDrawTexturesNs);
 
   // Bind the pipeline after configuring it and doing everything that may bind
   // other pipelines.
@@ -3068,10 +3100,12 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
       window_offset_tiles);
 
   // Update constant buffers, descriptors and root parameters.
+  draw_phases.Mark(perf::kDrawStateNs);
   if (!UpdateBindings(vertex_shader, pixel_shader, root_signature,
                       memexport_used)) {
     return false;
   }
+  draw_phases.Mark(perf::kDrawBindingsNs);
   // Must not call anything that can change the descriptor heap from now on!
 
   // Ensure vertex buffers are resident.
@@ -3704,6 +3738,7 @@ void D3D12CommandProcessor::InitializeTrace() {
 }
 
 bool D3D12CommandProcessor::IssueCopy() {
+  perf::ScopedTimer copy_timer(perf::kCopyNs);
 #if XE_GPU_FINE_GRAINED_DRAW_SCOPES
   SCOPE_profile_cpu_f("gpu");
 #endif  // XE_GPU_FINE_GRAINED_DRAW_SCOPES
