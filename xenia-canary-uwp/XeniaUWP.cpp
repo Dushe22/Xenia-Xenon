@@ -34,6 +34,10 @@
 #include "xenia/hid/nop/nop_hid.h"
 #include "xenia/apu/xaudio2/xaudio2_audio_system.h"
 #include "xenia/config.h"
+
+#include <atomic>
+#include "xenia/base/platform_win.h"
+#include <exception>
 #include "xenia/base/main_win.h"
 #include "xenia/vfs/devices/disc_zarchive_device.h"
 
@@ -151,7 +155,93 @@ void ResetAnalogNavRepeatStates() {
 
 }  // namespace
 
+// Declared by the desktop SDK headers only, but available to UWP apps (the
+// xenia-base library uses it too).
+extern "C" __declspec(dllimport) PVOID WINAPI AddVectoredExceptionHandler(
+    ULONG first, PVECTORED_EXCEPTION_HANDLER handler);
+
+namespace {
+// Writes fatal host crashes to xenia.log, so they can be found without the
+// multi-gigabyte crash dumps the console writes (which take minutes and are
+// often cut off by a restart). Offsets are relative to xeniacanary.exe and
+// can be symbolized with its PDB.
+std::atomic<int> s_crash_logs{0};
+
+void LogCrashStack(const char* what) {
+  const uintptr_t exe_base = uintptr_t(GetModuleHandleW(nullptr));
+  void* frames[48];
+  USHORT count = RtlCaptureStackBackTrace(1, 48, frames, nullptr);
+  std::string stack;
+  for (USHORT i = 0; i < count; ++i) {
+    uintptr_t address = uintptr_t(frames[i]);
+    uintptr_t offset = address - exe_base;
+    if (address >= exe_base && offset < 0x4000000) {
+      stack += fmt::format(" +{:X}", offset);
+    } else {
+      stack += fmt::format(" {:X}", address);
+    }
+  }
+  XELOGE("CRASH: {} | thread {} | stack (xeniacanary offsets):{}", what,
+         GetCurrentThreadId(), stack);
+  // Give the log writer thread time to write the message, then flush.
+  Sleep(300);
+  xe::FlushLog();
+}
+
+LONG CALLBACK CrashLogExceptionHandler(EXCEPTION_POINTERS* info) {
+  DWORD code = info->ExceptionRecord->ExceptionCode;
+  // Only exceptions that close the app. Guest memory accesses are handled
+  // earlier by Xenia's own handler, and C++ exceptions are logged by the
+  // terminate handler only if nothing catches them.
+  bool fatal = code == EXCEPTION_ACCESS_VIOLATION ||
+               code == EXCEPTION_STACK_OVERFLOW ||
+               code == EXCEPTION_ILLEGAL_INSTRUCTION ||
+               code == EXCEPTION_INT_DIVIDE_BY_ZERO ||
+               code == EXCEPTION_PRIV_INSTRUCTION ||
+               code == 0xC0000374 /* heap corruption */ ||
+               code == 0xC0000409 /* stack buffer overrun */;
+  if (fatal && s_crash_logs.fetch_add(1) < 4) {
+    const uintptr_t exe_base = uintptr_t(GetModuleHandleW(nullptr));
+    uintptr_t address = uintptr_t(info->ExceptionRecord->ExceptionAddress);
+    std::string what = fmt::format(
+        "exception {:08X} at {}{:X}", code,
+        address >= exe_base ? "+" : "", address >= exe_base ? address - exe_base
+                                                            : address);
+    if (code == EXCEPTION_ACCESS_VIOLATION &&
+        info->ExceptionRecord->NumberParameters >= 2) {
+      what += fmt::format(
+          " ({} {:X})",
+          info->ExceptionRecord->ExceptionInformation[0] ? "writing"
+                                                         : "reading",
+          info->ExceptionRecord->ExceptionInformation[1]);
+    }
+    LogCrashStack(what.c_str());
+  }
+  return EXCEPTION_CONTINUE_SEARCH;
+}
+
+void CrashLogTerminateHandler() {
+  std::string what = "uncaught C++ exception";
+  if (auto exception = std::current_exception()) {
+    try {
+      std::rethrow_exception(exception);
+    } catch (const std::exception& e) {
+      what += fmt::format(": {}", e.what());
+    } catch (...) {
+    }
+  }
+  if (s_crash_logs.fetch_add(1) < 4) {
+    LogCrashStack(what.c_str());
+  }
+  std::abort();
+}
+}  // namespace
+
 void UWP::StartXenia() {
+  // Called last among the vectored handlers, after Xenia's guest memory one.
+  AddVectoredExceptionHandler(0, CrashLogExceptionHandler);
+  std::set_terminate(CrashLogTerminateHandler);
+
   app_context = std::make_unique<ui::UWPWindowedAppContext>();
   app = xe::ui::GetWindowedAppCreator()(*app_context.get());
 
