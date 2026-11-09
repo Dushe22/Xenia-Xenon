@@ -58,6 +58,18 @@ DEFINE_bool(d3d12_clear_memory_page_state, true,
 DECLARE_bool(clear_memory_page_state);
 DECLARE_bool(readback_resolve_half_pixel_offset);
 
+DEFINE_int32(
+    readback_resolve_current_max_bytes, 0,
+    "With the fast readback resolve mode, resolves up to this size (in bytes) "
+    "wait for the GPU and give the game this frame's data, like the full "
+    "mode. Small resolves are often the scene brightness used for lighting, "
+    "which flickers when it's a frame late; large ones cost the most to wait "
+    "for. 0 disables it.",
+    "GPU");
+DEFINE_bool(
+    d3d12_log_readback_targets, false,
+    "Log the address and size of each new readback resolve target.",
+    "GPU.Debug");
 DEFINE_bool(
     d3d12_readback_copy_async, true,
     "With the fast readback resolve mode, copy readback data to guest memory "
@@ -3909,6 +3921,11 @@ bool D3D12CommandProcessor::IssueCopy_ReadbackResolvePath() {
 
   uint64_t resolve_key =
       MakeReadbackResolveKey(written_address, written_length);
+  if (cvars::d3d12_log_readback_targets &&
+      readback_buffers_.find(resolve_key) == readback_buffers_.end()) {
+    XELOGI("Readback target: 0x{:08X}, {} bytes{}", written_address,
+           readback_length, is_scaled ? " (scaled)" : "");
+  }
   ReadbackBuffer& rb = readback_buffers_[resolve_key];
   rb.last_used_frame = frame_current_;
   if (rb.write_frame != frame_current_) {
@@ -3945,6 +3962,12 @@ bool D3D12CommandProcessor::IssueCopy_ReadbackResolvePath() {
   }
 
   ReadbackResolveMode readback_mode = GetReadbackResolveMode();
+  if (readback_mode == ReadbackResolveMode::kFast &&
+      cvars::readback_resolve_current_max_bytes > 0 &&
+      readback_length <=
+          uint32_t(cvars::readback_resolve_current_max_bytes)) {
+    readback_mode = ReadbackResolveMode::kFull;
+  }
   uint32_t read_index = readback_mode == ReadbackResolveMode::kFast
                             ? 1 - write_index
                             : write_index;
