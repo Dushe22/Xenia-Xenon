@@ -365,7 +365,6 @@ inline const std::vector<Category>& Categories() {
           Toggle("Submit on primary buffer end",
                  "d3d12_submit_on_primary_buffer_end"),
           Toggle("Clear memory page state", "clear_memory_page_state"),
-          Toggle("Shader cache on disk", "d3d12_pipeline_library"),
           Toggle("Shader depth fix", "d3d12_shader_depth_fix"),
           Toggle("Reupload vertex data", "d3d12_reupload_vertex_data",
                  "Lowers performance. For testing stretched polygons."),

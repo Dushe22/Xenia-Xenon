@@ -3436,6 +3436,15 @@ void PipelineCache::OpenPipelineLibrary(const std::filesystem::path& path) {
   if (!cvars::d3d12_pipeline_library) {
     return;
   }
+  // On the Xbox (Microsoft adapter), any use of the shader cache APIs makes
+  // pipeline creation fail and loses the device, closing the game. Ignore the
+  // option there even if an old config still has it enabled.
+  if (command_processor_.GetD3D12Provider().GetAdapterVendorID() ==
+      ui::GraphicsProvider::GpuVendorID::kMicrosoft) {
+    XELOGW("Pipeline disk cache: not supported on this device, ignoring "
+           "d3d12_pipeline_library");
+    return;
+  }
   // ID3D12PipelineLibrary removes the device on the Xbox, so only per-pipeline
   // cached blobs are used, and only if the driver reports support for them.
   D3D12_FEATURE_DATA_SHADER_CACHE shader_cache = {};
