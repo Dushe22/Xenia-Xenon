@@ -9,6 +9,7 @@
 
 #include "xenia/base/memory.h"
 
+#include "xenia/base/logging.h"
 #include "xenia/base/platform_win.h"
 
 #if WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_DESKTOP | \
@@ -124,11 +125,25 @@ void* AllocFixed(void* base_address, size_t length,
   }
   DWORD protect = ToWin32ProtectFlags(access);
 #ifdef XE_BASE_MEMORY_WIN_USE_DESKTOP_FUNCTIONS
-  return VirtualAlloc(base_address, length, alloc_type, protect);
+  void* result = VirtualAlloc(base_address, length, alloc_type, protect);
 #else
-  return VirtualAllocFromApp(base_address, length, ULONG(alloc_type),
-                             ULONG(protect));
+  void* result = VirtualAllocFromApp(base_address, length, ULONG(alloc_type),
+                                     ULONG(protect));
 #endif
+  // Failing to reserve a fixed address is often expected (callers try other
+  // addresses), but failing to commit means the process is out of memory.
+  if (!result && (alloc_type & MEM_COMMIT)) {
+    DWORD error = GetLastError();
+    MEMORYSTATUSEX status = {sizeof(status)};
+    GlobalMemoryStatusEx(&status);
+    XELOGE(
+        "AllocFixed: can't commit {} KB at {}: error {} (memory available: "
+        "{} MB physical, {} MB commit)",
+        length / 1024, base_address, error, status.ullAvailPhys >> 20,
+        status.ullAvailPageFile >> 20);
+    SetLastError(error);
+  }
+  return result;
 }
 
 bool DeallocFixed(void* base_address, size_t length,

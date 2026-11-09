@@ -370,29 +370,52 @@ class CodeCacheBase : public CodeCache {
  private:
   Derived& self() { return static_cast<Derived&>(*this); }
 
+  bool CommitCodeRange(size_t offset, size_t length) {
+    if (generated_code_execute_base_ == generated_code_write_base_) {
+      return xe::memory::AllocFixed(
+                 generated_code_execute_base_ + offset, length,
+                 xe::memory::AllocationType::kCommit,
+                 xe::memory::PageAccess::kExecuteReadWrite) != nullptr;
+    }
+    return xe::memory::AllocFixed(generated_code_execute_base_ + offset,
+                                  length, xe::memory::AllocationType::kCommit,
+                                  xe::memory::PageAccess::kExecuteReadOnly) &&
+           xe::memory::AllocFixed(generated_code_write_base_ + offset, length,
+                                  xe::memory::AllocationType::kCommit,
+                                  xe::memory::PageAccess::kReadWrite);
+  }
+
   void EnsureCommitted(size_t high_mark) {
     using namespace xe::literals;
-    size_t old_commit_mark, new_commit_mark;
-    do {
-      old_commit_mark = generated_code_commit_mark_;
+    while (true) {
+      size_t old_commit_mark = generated_code_commit_mark_;
       if (high_mark <= old_commit_mark) {
-        break;
+        return;
       }
-      new_commit_mark = old_commit_mark + 16_MiB;
-      if (generated_code_execute_base_ == generated_code_write_base_) {
-        xe::memory::AllocFixed(generated_code_execute_base_, new_commit_mark,
-                               xe::memory::AllocationType::kCommit,
-                               xe::memory::PageAccess::kExecuteReadWrite);
-      } else {
-        xe::memory::AllocFixed(generated_code_execute_base_, new_commit_mark,
-                               xe::memory::AllocationType::kCommit,
-                               xe::memory::PageAccess::kExecuteReadOnly);
-        xe::memory::AllocFixed(generated_code_write_base_, new_commit_mark,
-                               xe::memory::AllocationType::kCommit,
-                               xe::memory::PageAccess::kReadWrite);
+      // Commits only the new part. The result used to be ignored, so when
+      // the system had no memory for a whole step the new code was written
+      // to uncommitted memory and the app crashed (WWE 2K14 on Xbox when a
+      // match started, past 32 MB of code).
+      size_t new_commit_mark = old_commit_mark + 16_MiB;
+      if (!CommitCodeRange(old_commit_mark,
+                           new_commit_mark - old_commit_mark)) {
+        // Commit only what the new code needs.
+        new_commit_mark = xe::round_up(high_mark, size_t(64_KiB));
+        if (!CommitCodeRange(old_commit_mark,
+                             new_commit_mark - old_commit_mark)) {
+          XELOGE(
+              "Code cache: out of memory for generated code ({} MB used)",
+              old_commit_mark >> 20);
+          xe::FlushLog();
+          return;
+        }
+        XELOGW("Code cache: committed only up to {} KB of generated code",
+               new_commit_mark >> 10);
       }
-    } while (generated_code_commit_mark_.compare_exchange_weak(
-        old_commit_mark, new_commit_mark));
+      // If another thread committed meanwhile, check its mark again.
+      generated_code_commit_mark_.compare_exchange_strong(old_commit_mark,
+                                                          new_commit_mark);
+    }
   }
 };
 
