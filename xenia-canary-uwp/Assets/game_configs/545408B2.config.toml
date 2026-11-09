@@ -7,8 +7,13 @@
 ignore_offset_for_ranged_allocations = true
 
 [GPU]
-# Asynchronous shader compilation takes CPU time from the emulator on Xbox.
-async_shader_compilation = false
+# Compile new shaders in the background (objects appear a few frames late)
+# instead of freezing the game on camera changes. Only 2 low-priority threads,
+# so compilation doesn't take CPU time from the emulator.
+async_shader_compilation = true
 # Some attire textures (such as Bobby Heenan's) are built on the GPU and read
 # back by the CPU. Without readback they come out black with magenta patches.
 readback_resolve = "fast"
+
+[D3D12]
+d3d12_pipeline_creation_threads = 2

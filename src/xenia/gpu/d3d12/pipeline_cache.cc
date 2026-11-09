@@ -63,6 +63,12 @@ DEFINE_int32(
     "the number of threads explicitly (up to the number of logical CPU cores), "
     "0 to disable multithreaded pipeline creation.",
     "D3D12");
+DEFINE_bool(
+    d3d12_pipeline_creation_low_priority, true,
+    "Run the pipeline creation threads below normal priority, so with "
+    "asynchronous shader compilation they use the CPU time the emulator "
+    "leaves free instead of slowing the game down.",
+    "D3D12");
 DEFINE_bool(d3d12_tessellation_wireframe, false,
             "Display tessellated surfaces as wireframe for debugging.",
             "D3D12");
@@ -200,6 +206,10 @@ bool PipelineCache::Initialize() {
           xe::threading::Thread::Create({}, [this, i]() { CreationThread(i); });
       assert_not_null(creation_thread);
       creation_thread->set_name("D3D12 Pipelines");
+      if (cvars::d3d12_pipeline_creation_low_priority) {
+        creation_thread->set_priority(
+            xe::threading::ThreadPriority::kBelowNormal);
+      }
       creation_threads_.push_back(std::move(creation_thread));
     }
   }
@@ -330,6 +340,10 @@ void PipelineCache::InitializeShaderStorage(
           });
       assert_not_null(creation_thread);
       creation_thread->set_name("D3D12 Pipelines");
+      if (cvars::d3d12_pipeline_creation_low_priority) {
+        creation_thread->set_priority(
+            xe::threading::ThreadPriority::kBelowNormal);
+      }
       creation_threads_.push_back(std::move(creation_thread));
     }
 
