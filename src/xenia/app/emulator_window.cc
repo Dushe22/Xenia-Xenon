@@ -266,7 +266,7 @@ namespace app {
 
 // Lets the right stick scroll the current window (frontend pages).
 static xe::app::xenon_settings::State* g_xenon_active_page_state = nullptr;
-static constexpr char kXenonVersion[] = "1.2.4.23";
+static constexpr char kXenonVersion[] = "1.2.4.24";
 static bool g_xenon_pergame_on_right = false;
 
 static void XenonGamepadScroll() {
@@ -1272,8 +1272,13 @@ std::string EmulatorWindow::InstallContentForTitle(
       try {
         auto abs_path = std::filesystem::absolute(it->path());
         Emulator::ContentInstallEntry install_entry(abs_path);
+        // Reads the package header to find where it goes
+        // (content/<xuid>/<title ID>/<content type>).
         X_STATUS result =
-            emulator_->InstallContentPackage(abs_path, install_entry);
+            emulator_->ProcessContentPackageHeader(abs_path, install_entry);
+        if (result == X_STATUS_SUCCESS) {
+          result = emulator_->InstallContentPackage(abs_path, install_entry);
+        }
         if (result == X_STATUS_SUCCESS) {
           ++installed;
           XELOGI("Installed content package {}", xe::path_to_utf8(abs_path));
