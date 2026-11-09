@@ -3911,6 +3911,12 @@ bool D3D12CommandProcessor::IssueCopy_ReadbackResolvePath() {
       MakeReadbackResolveKey(written_address, written_length);
   ReadbackBuffer& rb = readback_buffers_[resolve_key];
   rb.last_used_frame = frame_current_;
+  if (rb.write_frame != frame_current_) {
+    if (rb.write_frame != UINT64_MAX) {
+      rb.current_index = 1 - rb.current_index;
+    }
+    rb.write_frame = frame_current_;
+  }
 
   uint32_t write_index = rb.current_index;
   uint32_t size = AlignReadbackBufferSize(readback_length);
@@ -4357,10 +4363,7 @@ bool D3D12CommandProcessor::BeginSubmission(bool is_guest_command) {
 
     // The buffers read last frame are written by the GPU this frame.
     DrainReadbackCopies();
-    // Swap all readback buffers for delayed sync (one frame behind)
-    for (auto& pair : readback_buffers_) {
-      pair.second.current_index = 1 - pair.second.current_index;
-    }
+    // Readback buffers are swapped when they're used in the new frame.
 
     // Evict old readback buffers only when map gets too large to prevent
     // unbounded memory growth. Don't do this every frame as it's expensive.

@@ -804,6 +804,11 @@ class D3D12CommandProcessor final : public CommandProcessor {
     uint32_t sizes[2] = {0, 0};
     uint32_t current_index = 0;
     uint64_t last_used_frame = 0;
+    // Frame in which current_index was last written (UINT64_MAX if never).
+    // The buffers are swapped only when the resolve is used in a new frame,
+    // so the other buffer always holds the latest earlier data, even for
+    // resolves that a game does only every other frame.
+    uint64_t write_frame = UINT64_MAX;
     // Frame in which the previous frame's data was last copied to guest
     // memory (fast readback mode).
     uint64_t last_copied_frame = UINT64_MAX;
