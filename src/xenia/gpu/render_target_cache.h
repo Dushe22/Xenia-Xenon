@@ -609,7 +609,11 @@ class RenderTargetCache {
 
   void ResetAccumulatedRenderTargets() {
     are_accumulated_render_targets_valid_ = false;
+    update_skip_valid_ = false;
   }
+  // Something other than Update changed the render targets or the EDRAM
+  // ownership, so the next Update must do the full work.
+  void InvalidateUpdateSkip() { update_skip_valid_ = false; }
   RenderTarget* const* last_update_accumulated_render_targets() const {
     assert_true(GetPath() == Path::kHostRenderTargets);
     return last_update_accumulated_render_targets_;
@@ -853,6 +857,27 @@ class RenderTargetCache {
   // last_update_accumulated_render_targets_ - it's not beneficial or even
   // incorrect to keep the previously bound render targets.
   bool are_accumulated_render_targets_valid_ = false;
+  // The render targets a host render target Update has to set up, computed
+  // from the registers and the draw. When the next draw needs the same ones
+  // and nothing else changed the ownership in between, running Update again
+  // gives the same result with no transfers, so it's skipped (scenes with
+  // many draws to the same targets, such as crowds, spend a large part of
+  // each draw here).
+  struct UpdateSkipKey {
+    uint32_t used_bits;
+    uint32_t rts_are_64bpp;
+    uint32_t pitch_tiles_at_32bpp;
+    uint32_t msaa_samples;
+    uint32_t scale_native;
+    uint32_t height_used;
+    uint32_t window_offset;
+    uint32_t keep_aliased_depth;
+    uint32_t edram_bases[1 + xenos::kMaxColorRenderTargets];
+    uint32_t resource_formats[1 + xenos::kMaxColorRenderTargets];
+    uint32_t keep_depth_bits[1 + xenos::kMaxColorRenderTargets];
+  };
+  UpdateSkipKey update_skip_key_ = {};
+  bool update_skip_valid_ = false;
   // After an update (for simplicity, even an unsuccessful update invalidates
   // this), contains needed ownership transfer sources for each of the current
   // render targets. They are reordered so for one source, all transfers are

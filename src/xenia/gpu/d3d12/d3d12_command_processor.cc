@@ -2411,7 +2411,7 @@ void D3D12CommandProcessor::LogPerfStats() {
   };
   XELOGI(
       "Perf draws: {:.2f} us/draw ({:.1f} ms/frame) = primitive {:.2f} + "
-      "render targets {:.2f} + pipeline {:.2f} + textures {:.2f} + state "
+      "render targets {:.2f} ({:.0f}% reused) + pipeline {:.2f} + textures {:.2f} + state "
       "{:.2f} + bindings {:.2f} (constants {:.2f}, descriptors {:.2f}, root "
       "{:.2f}) + vertex buffers {:.2f} + submit {:.2f} (timer {:.0f} ns per "
       "read) | copies {:.1f} ms/frame "
@@ -2422,6 +2422,7 @@ void D3D12CommandProcessor::LogPerfStats() {
       per_draw_us(c[perf::kDrawTotalNs]), frame_ms(c[perf::kDrawTotalNs]),
       per_draw_us(c[perf::kDrawPrimitiveNs]),
       per_draw_us(c[perf::kDrawRenderTargetNs]),
+      double(c[perf::kDrawRenderTargetSkipCount]) * 100.0 / double(draws),
       per_draw_us(c[perf::kDrawPipelineNs]),
       per_draw_us(c[perf::kDrawTexturesNs]),
       per_draw_us(c[perf::kDrawStateNs]),

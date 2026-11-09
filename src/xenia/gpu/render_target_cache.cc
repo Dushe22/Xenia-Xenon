@@ -17,10 +17,17 @@
 #include "xenia/base/logging.h"
 #include "xenia/base/math.h"
 #include "xenia/gpu/draw_util.h"
+#include "xenia/gpu/perf_stats.h"
 #include "xenia/gpu/register_file.h"
 #include "xenia/gpu/registers.h"
 #include "xenia/gpu/xenos.h"
 
+DEFINE_bool(
+    render_target_update_skip, true,
+    "Skip setting up the render targets for a draw when they are the same as "
+    "for the previous one and nothing changed them in between. Saves time in "
+    "scenes with many draws.",
+    "GPU");
 DEFINE_bool(
     debug_msaa_2x_as_4x, false,
     "Use 4x MSAA with 2 samples instead of native 2x MSAA when available. "
@@ -564,6 +571,7 @@ void RenderTargetCache::InitializeCommon() {
 }
 
 void RenderTargetCache::DestroyAllRenderTargets(bool shutting_down) {
+  InvalidateUpdateSkip();
   ownership_ranges_.clear();
   if (!shutting_down) {
     ownership_ranges_.emplace(
@@ -583,6 +591,7 @@ void RenderTargetCache::DestroyAllRenderTargets(bool shutting_down) {
 void RenderTargetCache::ShutdownCommon() { DestroyAllRenderTargets(true); }
 
 void RenderTargetCache::ClearCache() {
+  InvalidateUpdateSkip();
   // Keep only render targets currently owning any EDRAM data.
   if (!render_targets_.empty()) {
     std::unordered_set<RenderTargetKey, RenderTargetKey::Hasher>
@@ -922,6 +931,7 @@ bool RenderTargetCache::Update(bool is_rasterization_done,
   }
 
   if (!depth_and_color_rts_used_bits) {
+    update_skip_valid_ = false;
     // Nothing to bind, don't waste time on things like memexport-only draws -
     // just check if old bindings can still be used.
     std::memset(last_update_used_render_targets_, 0,
@@ -971,6 +981,36 @@ bool RenderTargetCache::Update(bool is_rasterization_done,
     height_used = std::min(
         height_used, GetRenderTargetHeight(pitch_tiles_at_32bpp, msaa_samples));
   }
+
+  UpdateSkipKey skip_key;
+  bool skip_key_used = !interlock_barrier_only;
+  if (skip_key_used) {
+    std::memset(&skip_key, 0, sizeof(skip_key));
+    skip_key.used_bits = depth_and_color_rts_used_bits;
+    skip_key.rts_are_64bpp = rts_are_64bpp;
+    skip_key.pitch_tiles_at_32bpp = pitch_tiles_at_32bpp;
+    skip_key.msaa_samples = uint32_t(msaa_samples);
+    skip_key.scale_native = uint32_t(scale_native);
+    skip_key.height_used = height_used;
+    skip_key.window_offset =
+        window_offset_tiles ? regs.Get<reg::PA_SC_WINDOW_OFFSET>().value : 0;
+    skip_key.keep_aliased_depth = uint32_t(keep_aliased_depth);
+    for (uint32_t i = 0; i < 1 + xenos::kMaxColorRenderTargets; ++i) {
+      if (depth_and_color_rts_used_bits & (uint32_t(1) << i)) {
+        skip_key.edram_bases[i] = edram_bases[i];
+        skip_key.resource_formats[i] = resource_formats[i];
+        skip_key.keep_depth_bits[i] = uint32_t(rts_keep_depth_bits[i]);
+      }
+    }
+    if (cvars::render_target_update_skip && update_skip_valid_ &&
+        !std::memcmp(&skip_key, &update_skip_key_, sizeof(skip_key))) {
+      // Same render targets as the previous draw: the bindings and the
+      // ownership are already right, and there are no transfers to do.
+      perf::Add(perf::kDrawRenderTargetSkipCount, 1);
+      return true;
+    }
+  }
+  update_skip_valid_ = false;
 
   RenderTargetKey rt_keys[1 + xenos::kMaxColorRenderTargets] = {};
   RenderTarget* rts[1 + xenos::kMaxColorRenderTargets] = {};
@@ -1285,6 +1325,11 @@ bool RenderTargetCache::Update(bool is_rasterization_done,
     are_accumulated_render_targets_valid_ = true;
   }
 
+  // ChangeOwnership above invalidated the skip, set it for the next draw.
+  if (skip_key_used) {
+    update_skip_key_ = skip_key;
+    update_skip_valid_ = true;
+  }
   return true;
 }
 
@@ -1738,6 +1783,7 @@ RenderTargetCache::PrepareFullEdram1280xRenderTargetForSnapshotRestoration(
   }
   // Change ownership, but don't transfer the contents - they will be replaced
   // anyway.
+  InvalidateUpdateSkip();
   ownership_ranges_.clear();
   ownership_ranges_.emplace(
       std::piecewise_construct, std::forward_as_tuple(uint32_t(0)),
@@ -1748,6 +1794,7 @@ RenderTargetCache::PrepareFullEdram1280xRenderTargetForSnapshotRestoration(
 
 void RenderTargetCache::PixelShaderInterlockFullEdramBarrierPlaced() {
   assert_true(GetPath() == Path::kPixelShaderInterlock);
+  InvalidateUpdateSkip();
   interlock_last_window_offset_ = UINT32_MAX;
   // Clear ownership - any overlap of data written before the barrier is safe.
   OwnershipRange empty_range(edram_tile_count_, RenderTargetKey(),
@@ -1947,6 +1994,7 @@ void RenderTargetCache::ChangeOwnership(
     RenderTargetKey dest, uint32_t start_tiles_base_relative,
     uint32_t length_tiles, std::vector<Transfer>* transfers_append_out,
     const Transfer::Rectangle* resolve_clear_cutout, bool keep_depth_bits) {
+  InvalidateUpdateSkip();
   // edram_tile_count_ with length 0 is fine if both the start and the end
   // are clamped to edram_tile_count_.
   assert_true(start_tiles_base_relative <=

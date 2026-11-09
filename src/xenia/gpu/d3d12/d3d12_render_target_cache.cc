@@ -1781,6 +1781,7 @@ void D3D12RenderTargetCache::InitializeTraceCompleteDownloads() {
 
 void D3D12RenderTargetCache::RestoreEdramSnapshot(const void* snapshot,
                                                   size_t size_bytes) {
+  InvalidateUpdateSkip();
   if (IsDrawResolutionScaled()) {
     // No 1:1 mapping.
     return;

@@ -54,6 +54,7 @@ enum Counter : uint32_t {
   kDrawBindConstantsNs,    // Root signature and constant buffers.
   kDrawBindDescriptorsNs,  // Shared memory, texture and sampler descriptors.
   kDrawVertexBuffersNs,    // Vertex buffers made resident in shared memory.
+  kDrawRenderTargetSkipCount,  // Draws that reused the previous render targets.
   // Resolves (IssueCopy), including readbacks.
   kCopyNs,
   // Parts of the readback resolves: the resolve itself, waiting for the host
