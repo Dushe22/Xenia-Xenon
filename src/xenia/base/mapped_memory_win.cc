@@ -10,6 +10,7 @@
 #include <mutex>
 
 #include "third_party/fmt/include/fmt/format.h"
+#include "xenia/base/filesystem.h"
 #include "xenia/base/logging.h"
 #include "xenia/base/mapped_memory.h"
 #include "xenia/base/math.h"
@@ -137,6 +138,8 @@ std::unique_ptr<MappedMemory> MappedMemory::Open(
   mm->file_handle = CreateFile(path.c_str(), file_access, file_share, nullptr,
                                create_mode, FILE_ATTRIBUTE_NORMAL, nullptr);
   if (mm->file_handle == Win32MappedMemory::kFileHandleInvalid) {
+    XELOGW("MappedMemory: can't open {}: error {}", xe::path_to_utf8(path),
+           GetLastError());
     return nullptr;
   }
 
@@ -150,6 +153,8 @@ std::unique_ptr<MappedMemory> MappedMemory::Open(
                                ULONG64(aligned_length), nullptr);
 #endif
   if (mm->mapping_handle == Win32MappedMemory::kMappingHandleInvalid) {
+    XELOGW("MappedMemory: can't create a mapping of {}: error {}",
+           xe::path_to_utf8(path), GetLastError());
     return nullptr;
   }
 
@@ -163,6 +168,8 @@ std::unique_ptr<MappedMemory> MappedMemory::Open(
                            ULONG64(aligned_offset), aligned_length));
 #endif
   if (!mm->data_) {
+    XELOGW("MappedMemory: can't map a view of {}: error {}",
+           xe::path_to_utf8(path), GetLastError());
     return nullptr;
   }
 
