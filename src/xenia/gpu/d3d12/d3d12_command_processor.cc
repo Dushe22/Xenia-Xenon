@@ -59,6 +59,12 @@ DECLARE_bool(clear_memory_page_state);
 DECLARE_bool(readback_resolve_half_pixel_offset);
 
 DEFINE_bool(
+    d3d12_readback_copy_async, true,
+    "With the fast readback resolve mode, copy readback data to guest memory "
+    "on a separate thread instead of the GPU thread. The copies are finished "
+    "before the next frame starts.",
+    "D3D12");
+DEFINE_bool(
     d3d12_readback_copy_once_per_frame, true,
     "With the fast readback resolve mode, copy each resolve's data to guest "
     "memory only once per frame. The data comes from the previous frame, so "
@@ -1749,6 +1755,17 @@ bool D3D12CommandProcessor::SetupContext() {
 void D3D12CommandProcessor::ShutdownContext() {
   AwaitAllQueueOperationsCompletion();
 
+  if (readback_copy_thread_.joinable()) {
+    DrainReadbackCopies();
+    {
+      std::lock_guard<std::mutex> lock(readback_copy_mutex_);
+      readback_copy_exit_ = true;
+    }
+    readback_copy_cv_.notify_all();
+    readback_copy_thread_.join();
+    readback_copy_exit_ = false;
+  }
+
   for (auto& pair : readback_buffers_) {
     ui::d3d12::util::ReleaseAndNull(pair.second.buffers[0]);
     ui::d3d12::util::ReleaseAndNull(pair.second.buffers[1]);
@@ -2379,8 +2396,9 @@ void D3D12CommandProcessor::LogPerfStats() {
       "render targets {:.2f} + pipeline {:.2f} + textures {:.2f} + state "
       "{:.2f} + bindings {:.2f} + submit {:.2f} | copies {:.1f} ms/frame "
       "(readbacks: resolve {:.1f} + GPU sync {:.1f} + copy to guest {:.1f} "
-      "ms, {:.2f} MB/frame, skipped {:.1f}/frame {:.2f} MB/frame) | other "
-      "GPU thread work {:.1f} ms/frame",
+      "ms, {:.2f} MB/frame, skipped {:.1f}/frame {:.2f} MB/frame, waiting "
+      "for the copy thread {:.1f} ms) | other GPU thread work {:.1f} "
+      "ms/frame",
       per_draw_us(c[perf::kDrawTotalNs]), frame_ms(c[perf::kDrawTotalNs]),
       per_draw_us(c[perf::kDrawPrimitiveNs]),
       per_draw_us(c[perf::kDrawRenderTargetNs]),
@@ -2397,6 +2415,7 @@ void D3D12CommandProcessor::LogPerfStats() {
           double(std::max(c[perf::kSwapCount], uint64_t(1))),
       double(c[perf::kReadbackSkippedBytes]) / (1024.0 * 1024.0) /
           double(std::max(c[perf::kSwapCount], uint64_t(1))),
+      frame_ms(c[perf::kReadbackDrainNs]),
       frame_ms(gpu_thread_busy_ns -
                std::min(gpu_thread_busy_ns,
                         c[perf::kDrawTotalNs] + c[perf::kCopyNs])));
@@ -4063,6 +4082,13 @@ bool D3D12CommandProcessor::IssueCopy_ReadbackResolvePath() {
   perf::Add(perf::kReadbackBytes, readback_length);
 
   ID3D12Resource* read_source = rb.buffers[read_index];
+  if (read_source != nullptr && readback_length <= rb.sizes[read_index] &&
+      readback_mode == ReadbackResolveMode::kFast && !read_cache_miss &&
+      cvars::d3d12_readback_copy_async && !cvars::d3d12_debug_depth_probe) {
+    QueueReadbackCopy(read_source, memory_->TranslatePhysical(written_address),
+                      readback_length);
+    return true;
+  }
   if (read_source != nullptr && readback_length <= rb.sizes[read_index]) {
     D3D12_RANGE readback_range;
     readback_range.Begin = 0;
@@ -4089,6 +4115,62 @@ bool D3D12CommandProcessor::IssueCopy_ReadbackResolvePath() {
     }
   }
   return true;
+}
+
+void D3D12CommandProcessor::QueueReadbackCopy(ID3D12Resource* source,
+                                              uint8_t* destination,
+                                              uint32_t length) {
+  source->AddRef();
+  {
+    std::lock_guard<std::mutex> lock(readback_copy_mutex_);
+    if (!readback_copy_thread_.joinable()) {
+      readback_copy_thread_ = std::thread([this]() { ReadbackCopyThread(); });
+    }
+    readback_copy_jobs_.push_back({source, destination, length});
+    ++readback_copies_pending_;
+  }
+  readback_copy_cv_.notify_one();
+}
+
+void D3D12CommandProcessor::DrainReadbackCopies() {
+  std::unique_lock<std::mutex> lock(readback_copy_mutex_);
+  if (!readback_copies_pending_) {
+    return;
+  }
+  perf::ScopedTimer drain_timer(perf::kReadbackDrainNs);
+  readback_copy_done_cv_.wait(lock,
+                              [this]() { return !readback_copies_pending_; });
+}
+
+void D3D12CommandProcessor::ReadbackCopyThread() {
+  std::unique_lock<std::mutex> lock(readback_copy_mutex_);
+  while (true) {
+    readback_copy_cv_.wait(lock, [this]() {
+      return readback_copy_exit_ || !readback_copy_jobs_.empty();
+    });
+    if (readback_copy_jobs_.empty()) {
+      return;
+    }
+    ReadbackCopyJob job = readback_copy_jobs_.front();
+    readback_copy_jobs_.pop_front();
+    lock.unlock();
+    {
+      perf::ScopedTimer memcpy_timer(perf::kReadbackMemcpyNs);
+      D3D12_RANGE read_range = {0, job.length};
+      void* mapping;
+      if (SUCCEEDED(job.source->Map(0, &read_range, &mapping))) {
+        memory::vastcpy(job.destination, static_cast<uint8_t*>(mapping),
+                        job.length);
+        D3D12_RANGE write_range = {};
+        job.source->Unmap(0, &write_range);
+      }
+      job.source->Release();
+    }
+    lock.lock();
+    if (!--readback_copies_pending_) {
+      readback_copy_done_cv_.notify_all();
+    }
+  }
 }
 
 void D3D12CommandProcessor::CheckSubmissionCompletion(
@@ -4273,6 +4355,8 @@ bool D3D12CommandProcessor::BeginSubmission(bool is_guest_command) {
   if (is_opening_frame) {
     frame_open_ = true;
 
+    // The buffers read last frame are written by the GPU this frame.
+    DrainReadbackCopies();
     // Swap all readback buffers for delayed sync (one frame behind)
     for (auto& pair : readback_buffers_) {
       pair.second.current_index = 1 - pair.second.current_index;

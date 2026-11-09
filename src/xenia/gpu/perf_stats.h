@@ -62,6 +62,8 @@ enum Counter : uint32_t {
   // frame.
   kReadbackSkippedCount,
   kReadbackSkippedBytes,
+  // GPU thread waiting for the readback copy thread to finish.
+  kReadbackDrainNs,
   kCounterCount,
 };
 

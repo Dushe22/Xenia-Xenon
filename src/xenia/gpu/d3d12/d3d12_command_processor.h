@@ -12,7 +12,10 @@
 
 #include <algorithm>
 #include <atomic>
+#include <condition_variable>
 #include <deque>
+#include <mutex>
+#include <thread>
 #include <memory>
 #include <optional>
 #include <string>
@@ -807,6 +810,27 @@ class D3D12CommandProcessor final : public CommandProcessor {
   };
   // Map: (written_address << 32 | written_length) -> ReadbackBuffer
   std::unordered_map<uint64_t, ReadbackBuffer> readback_buffers_;
+
+  // Copies of fast readbacks to guest memory, done on a separate thread. The
+  // data is from the previous frame, so it only has to be copied before the
+  // GPU writes to the buffer again in the next frame.
+  struct ReadbackCopyJob {
+    ID3D12Resource* source;  // Referenced until the copy is done.
+    uint8_t* destination;
+    uint32_t length;
+  };
+  void QueueReadbackCopy(ID3D12Resource* source, uint8_t* destination,
+                         uint32_t length);
+  // Waits until all queued readback copies are done.
+  void DrainReadbackCopies();
+  void ReadbackCopyThread();
+  std::thread readback_copy_thread_;
+  std::mutex readback_copy_mutex_;
+  std::condition_variable readback_copy_cv_;
+  std::condition_variable readback_copy_done_cv_;
+  std::deque<ReadbackCopyJob> readback_copy_jobs_;
+  size_t readback_copies_pending_ = 0;
+  bool readback_copy_exit_ = false;
 
   // Simple single buffer for memexport (always syncs, no double-buffering)
   ID3D12Resource* memexport_readback_buffer_ = nullptr;
