@@ -58,6 +58,10 @@ enum Counter : uint32_t {
   kReadbackSyncNs,
   kReadbackMemcpyNs,
   kReadbackBytes,
+  // Readback copies skipped because the same data was already copied this
+  // frame.
+  kReadbackSkippedCount,
+  kReadbackSkippedBytes,
   kCounterCount,
 };
 

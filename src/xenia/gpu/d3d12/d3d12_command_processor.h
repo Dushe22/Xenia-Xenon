@@ -801,6 +801,9 @@ class D3D12CommandProcessor final : public CommandProcessor {
     uint32_t sizes[2] = {0, 0};
     uint32_t current_index = 0;
     uint64_t last_used_frame = 0;
+    // Frame in which the previous frame's data was last copied to guest
+    // memory (fast readback mode).
+    uint64_t last_copied_frame = UINT64_MAX;
   };
   // Map: (written_address << 32 | written_length) -> ReadbackBuffer
   std::unordered_map<uint64_t, ReadbackBuffer> readback_buffers_;

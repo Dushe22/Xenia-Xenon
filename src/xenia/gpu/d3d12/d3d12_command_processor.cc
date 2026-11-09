@@ -58,6 +58,14 @@ DEFINE_bool(d3d12_clear_memory_page_state, true,
 DECLARE_bool(clear_memory_page_state);
 DECLARE_bool(readback_resolve_half_pixel_offset);
 
+DEFINE_bool(
+    d3d12_readback_copy_once_per_frame, true,
+    "With the fast readback resolve mode, copy each resolve's data to guest "
+    "memory only once per frame. The data comes from the previous frame, so "
+    "when a game resolves to the same place several times in a frame, the "
+    "later copies are the same and only cost time.",
+    "D3D12");
+
 DECLARE_bool(d3d12_debug_depth_probe);
 DECLARE_path(trace_dump_path);
 DEFINE_string(
@@ -2371,7 +2379,8 @@ void D3D12CommandProcessor::LogPerfStats() {
       "render targets {:.2f} + pipeline {:.2f} + textures {:.2f} + state "
       "{:.2f} + bindings {:.2f} + submit {:.2f} | copies {:.1f} ms/frame "
       "(readbacks: resolve {:.1f} + GPU sync {:.1f} + copy to guest {:.1f} "
-      "ms, {:.2f} MB/frame) | other GPU thread work {:.1f} ms/frame",
+      "ms, {:.2f} MB/frame, skipped {:.1f}/frame {:.2f} MB/frame) | other "
+      "GPU thread work {:.1f} ms/frame",
       per_draw_us(c[perf::kDrawTotalNs]), frame_ms(c[perf::kDrawTotalNs]),
       per_draw_us(c[perf::kDrawPrimitiveNs]),
       per_draw_us(c[perf::kDrawRenderTargetNs]),
@@ -2383,6 +2392,10 @@ void D3D12CommandProcessor::LogPerfStats() {
       frame_ms(c[perf::kReadbackResolveNs]), frame_ms(c[perf::kReadbackSyncNs]),
       frame_ms(c[perf::kReadbackMemcpyNs]),
       double(c[perf::kReadbackBytes]) / (1024.0 * 1024.0) /
+          double(std::max(c[perf::kSwapCount], uint64_t(1))),
+      double(c[perf::kReadbackSkippedCount]) /
+          double(std::max(c[perf::kSwapCount], uint64_t(1))),
+      double(c[perf::kReadbackSkippedBytes]) / (1024.0 * 1024.0) /
           double(std::max(c[perf::kSwapCount], uint64_t(1))),
       frame_ms(gpu_thread_busy_ns -
                std::min(gpu_thread_busy_ns,
@@ -4036,6 +4049,15 @@ bool D3D12CommandProcessor::IssueCopy_ReadbackResolvePath() {
     if (!AwaitAllQueueOperationsCompletion()) {
       return true;
     }
+  }
+  if (readback_mode == ReadbackResolveMode::kFast && !read_cache_miss &&
+      cvars::d3d12_readback_copy_once_per_frame) {
+    if (rb.last_copied_frame == frame_current_) {
+      perf::Add(perf::kReadbackSkippedCount, 1);
+      perf::Add(perf::kReadbackSkippedBytes, readback_length);
+      return true;
+    }
+    rb.last_copied_frame = frame_current_;
   }
   perf::ScopedTimer memcpy_timer(perf::kReadbackMemcpyNs);
   perf::Add(perf::kReadbackBytes, readback_length);
