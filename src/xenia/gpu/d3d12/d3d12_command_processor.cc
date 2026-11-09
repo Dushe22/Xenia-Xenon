@@ -2437,6 +2437,64 @@ void D3D12CommandProcessor::LogPerfStats() {
       frame_ms(gpu_thread_busy_ns -
                std::min(gpu_thread_busy_ns,
                         c[perf::kDrawTotalNs] + c[perf::kCopyNs])));
+  LogThreadCpuUsage(elapsed_ns);
+}
+
+void D3D12CommandProcessor::LogThreadCpuUsage(uint64_t elapsed_ns) {
+  // Shows which threads are busy: the GPU thread waiting for the game
+  // (WAIT_REG_MEM) means the game's own threads may be what limits the
+  // frame rate.
+  if (!kernel_state_ || !elapsed_ns) {
+    return;
+  }
+  auto threads =
+      kernel_state_->object_table()->GetObjectsByType<kernel::XThread>();
+  std::vector<std::pair<double, std::string>> usage;
+  std::unordered_map<uint32_t, uint64_t> current;
+  for (auto& thread : threads) {
+    xe::threading::Thread* host_thread = thread->thread();
+    if (!host_thread) {
+      continue;
+    }
+    FILETIME creation_time, exit_time, kernel_time, user_time;
+    if (!GetThreadTimes(HANDLE(host_thread->native_handle()), &creation_time,
+                        &exit_time, &kernel_time, &user_time)) {
+      continue;
+    }
+    uint64_t cpu_100ns =
+        ((uint64_t(kernel_time.dwHighDateTime) << 32) |
+         kernel_time.dwLowDateTime) +
+        ((uint64_t(user_time.dwHighDateTime) << 32) | user_time.dwLowDateTime);
+    uint32_t id = thread->thread_id();
+    current[id] = cpu_100ns;
+    auto last = perf_log_thread_cpu_100ns_.find(id);
+    if (last == perf_log_thread_cpu_100ns_.end() || last->second > cpu_100ns) {
+      continue;
+    }
+    double percent =
+        double(cpu_100ns - last->second) * 100.0 * 100.0 / double(elapsed_ns);
+    if (percent >= 5.0) {
+      std::string name = thread->name();
+      // Names end with the handle, such as "Main XThread (F8000038)".
+      size_t paren = name.rfind(" (");
+      if (paren != std::string::npos) {
+        name.resize(paren);
+      }
+      usage.emplace_back(percent, fmt::format("{} {:X}", name, id));
+    }
+  }
+  perf_log_thread_cpu_100ns_ = std::move(current);
+  if (usage.empty()) {
+    return;
+  }
+  std::sort(usage.begin(), usage.end(),
+            [](const auto& a, const auto& b) { return a.first > b.first; });
+  std::string text;
+  for (size_t i = 0; i < std::min(usage.size(), size_t(8)); ++i) {
+    text += fmt::format("{}{} {:.0f}%", i ? " | " : "", usage[i].second,
+                        usage[i].first);
+  }
+  XELOGI("Perf threads: {}", text);
 }
 
 uint64_t D3D12CommandProcessor::GetProcessCpuTime100ns() {

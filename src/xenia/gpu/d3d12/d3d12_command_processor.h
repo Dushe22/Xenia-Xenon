@@ -453,6 +453,9 @@ class D3D12CommandProcessor final : public CommandProcessor {
   static uint64_t GetProcessCpuTime100ns();
   uint64_t perf_log_last_ns_ = 0;
   uint64_t perf_log_last_cpu_100ns_ = 0;
+  // CPU time of each emulated thread at the last perf log, by thread ID.
+  std::unordered_map<uint32_t, uint64_t> perf_log_thread_cpu_100ns_;
+  void LogThreadCpuUsage(uint64_t elapsed_ns);
   // Checks if ending a submission right now would not cause potentially more
   // delay than it would reduce by making the GPU start working earlier - such
   // as when there are unfinished graphics pipeline creation requests that would
