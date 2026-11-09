@@ -3975,6 +3975,11 @@ bool D3D12CommandProcessor::IssueCopy_ReadbackResolvePath() {
                          (rb.buffers[read_index] == nullptr ||
                           readback_length > rb.sizes[read_index]);
 
+  // The copy thread may still be reading this buffer from an earlier frame.
+  if (rb.buffers[write_index]) {
+    AwaitReadbackCopiesFrom(rb.buffers[write_index]);
+  }
+
   if (is_scaled) {
     // Scaled path: downscale on the GPU, then copy the 1x data to the
     // readback buffer.
@@ -4171,6 +4176,26 @@ void D3D12CommandProcessor::DrainReadbackCopies() {
                               [this]() { return !readback_copies_pending_; });
 }
 
+void D3D12CommandProcessor::AwaitReadbackCopiesFrom(ID3D12Resource* buffer) {
+  std::unique_lock<std::mutex> lock(readback_copy_mutex_);
+  auto is_used = [this, buffer]() {
+    if (readback_copy_running_source_ == buffer) {
+      return true;
+    }
+    for (const ReadbackCopyJob& job : readback_copy_jobs_) {
+      if (job.source == buffer) {
+        return true;
+      }
+    }
+    return false;
+  };
+  if (!is_used()) {
+    return;
+  }
+  perf::ScopedTimer drain_timer(perf::kReadbackDrainNs);
+  readback_copy_done_cv_.wait(lock, [&is_used]() { return !is_used(); });
+}
+
 void D3D12CommandProcessor::ReadbackCopyThread() {
   std::unique_lock<std::mutex> lock(readback_copy_mutex_);
   while (true) {
@@ -4182,6 +4207,7 @@ void D3D12CommandProcessor::ReadbackCopyThread() {
     }
     ReadbackCopyJob job = readback_copy_jobs_.front();
     readback_copy_jobs_.pop_front();
+    readback_copy_running_source_ = job.source;
     lock.unlock();
     {
       perf::ScopedTimer memcpy_timer(perf::kReadbackMemcpyNs);
@@ -4196,9 +4222,9 @@ void D3D12CommandProcessor::ReadbackCopyThread() {
       job.source->Release();
     }
     lock.lock();
-    if (!--readback_copies_pending_) {
-      readback_copy_done_cv_.notify_all();
-    }
+    readback_copy_running_source_ = nullptr;
+    --readback_copies_pending_;
+    readback_copy_done_cv_.notify_all();
   }
 }
 
@@ -4384,9 +4410,9 @@ bool D3D12CommandProcessor::BeginSubmission(bool is_guest_command) {
   if (is_opening_frame) {
     frame_open_ = true;
 
-    // The buffers read last frame are written by the GPU this frame.
-    DrainReadbackCopies();
-    // Readback buffers are swapped when they're used in the new frame.
+    // Readback buffers are swapped when they're used in the new frame. Copies
+    // from them are awaited in IssueCopy_ReadbackResolvePath before the GPU
+    // writes to them again.
 
     // Evict old readback buffers only when map gets too large to prevent
     // unbounded memory growth. Don't do this every frame as it's expensive.

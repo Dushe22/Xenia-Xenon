@@ -828,6 +828,10 @@ class D3D12CommandProcessor final : public CommandProcessor {
                          uint32_t length);
   // Waits until all queued readback copies are done.
   void DrainReadbackCopies();
+  // Waits until no queued or running copy reads from the buffer, before the
+  // GPU writes to it again. Must be called without the global critical region
+  // held: copying to guest memory may trigger write watches that take it.
+  void AwaitReadbackCopiesFrom(ID3D12Resource* buffer);
   void ReadbackCopyThread();
   std::thread readback_copy_thread_;
   std::mutex readback_copy_mutex_;
@@ -835,6 +839,7 @@ class D3D12CommandProcessor final : public CommandProcessor {
   std::condition_variable readback_copy_done_cv_;
   std::deque<ReadbackCopyJob> readback_copy_jobs_;
   size_t readback_copies_pending_ = 0;
+  ID3D12Resource* readback_copy_running_source_ = nullptr;
   bool readback_copy_exit_ = false;
 
   // Simple single buffer for memexport (always syncs, no double-buffering)
