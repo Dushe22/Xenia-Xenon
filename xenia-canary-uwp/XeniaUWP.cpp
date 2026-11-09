@@ -15,6 +15,7 @@
 #include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.Networking.h>
 #include <winrt/Windows.Networking.Connectivity.h>
+#include <winrt/Windows.System.h>
 #include "surface_uwp.h"
 #include "window_uwp.h"
 
@@ -26,6 +27,7 @@
 #include "xenia/base/cvar.h"
 #include "xenia/base/logging.h"
 #include "xenia/base/clock.h"
+#include "xenia/base/memory.h"
 #include "xenia/base/logging.h"
 #include "xenia/ui/window.h"
 #include "xenia/ui/d3d12/d3d12_provider.h"
@@ -237,7 +239,18 @@ void CrashLogTerminateHandler() {
 }
 }  // namespace
 
+static bool QueryUWPAppMemoryUsage(uint64_t& usage, uint64_t& limit) {
+  try {
+    usage = winrt::Windows::System::MemoryManager::AppMemoryUsage();
+    limit = winrt::Windows::System::MemoryManager::AppMemoryUsageLimit();
+    return true;
+  } catch (...) {
+    return false;
+  }
+}
+
 void UWP::StartXenia() {
+  xe::memory::SetAppMemoryUsageQuery(QueryUWPAppMemoryUsage);
   // Called last among the vectored handlers, after Xenia's guest memory one.
   AddVectoredExceptionHandler(0, CrashLogExceptionHandler);
   std::set_terminate(CrashLogTerminateHandler);

@@ -136,11 +136,17 @@ void* AllocFixed(void* base_address, size_t length,
     DWORD error = GetLastError();
     MEMORYSTATUSEX status = {sizeof(status)};
     GlobalMemoryStatusEx(&status);
+    uint64_t app_usage = 0, app_limit = 0;
+    std::string app_memory;
+    if (QueryAppMemoryUsage(app_usage, app_limit)) {
+      app_memory = fmt::format(", app uses {} of {} MB", app_usage >> 20,
+                               app_limit >> 20);
+    }
     XELOGE(
         "AllocFixed: can't commit {} KB at {}: error {} (memory available: "
-        "{} MB physical, {} MB commit)",
+        "{} MB physical, {} MB commit{})",
         length / 1024, base_address, error, status.ullAvailPhys >> 20,
-        status.ullAvailPageFile >> 20);
+        status.ullAvailPageFile >> 20, app_memory);
     SetLastError(error);
   }
   return result;

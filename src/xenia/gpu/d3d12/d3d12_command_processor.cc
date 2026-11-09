@@ -2380,7 +2380,7 @@ void D3D12CommandProcessor::LogPerfStats() {
       "Perf: {:.1f} fps, {:.0f} draws/frame | GPU thread: busy {:.0f}%, idle "
       "(waiting for guest) {:.0f}%, WAIT_REG_MEM {:.0f}%, host GPU wait {:.0f}% "
       "({}x) | pipelines {}x {:.1f} ms | textures {}x {:.1f} ms | upload {:.1f} "
-      "MB/s | readbacks {}/frame | process CPU {:.2f} cores",
+      "MB/s | readbacks {}/frame | process CPU {:.2f} cores{}",
       double(c[perf::kSwapCount]) / seconds,
       c[perf::kSwapCount]
           ? double(c[perf::kDrawCount]) / double(c[perf::kSwapCount])
@@ -2394,7 +2394,13 @@ void D3D12CommandProcessor::LogPerfStats() {
       c[perf::kSwapCount]
           ? double(c[perf::kReadbackCount]) / double(c[perf::kSwapCount])
           : 0.0,
-      cpu_cores);
+      cpu_cores, [] {
+        uint64_t usage = 0, limit = 0;
+        return xe::memory::QueryAppMemoryUsage(usage, limit)
+                   ? fmt::format(" | app memory {} / {} MB", usage >> 20,
+                                 limit >> 20)
+                   : std::string();
+      }());
   uint64_t draws = std::max(c[perf::kDrawCount], uint64_t(1));
   auto per_draw_us = [draws](uint64_t ns) {
     return double(ns) * 1e-3 / double(draws);

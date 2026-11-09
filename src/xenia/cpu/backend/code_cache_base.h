@@ -348,6 +348,21 @@ class CodeCacheBase : public CodeCache {
     }
 
     generated_code_map_.reserve(kMaximumFunctionCount);
+
+#if XE_PLATFORM_WINRT
+    // The app has a memory limit on Xbox, and by the time a game loads new
+    // code (such as when a WWE 2K14 match starts) the rest of the emulator
+    // may have used it up, so the code cache can't grow and the game
+    // crashes. Commit space for the code now while memory is free.
+    for (size_t size_mb : {128, 96, 64, 48, 32}) {
+      size_t size = size_t(size_mb) << 20;
+      if (CommitCodeRange(0, size)) {
+        generated_code_commit_mark_ = size;
+        XELOGI("Code cache: {} MB committed for generated code", size_mb);
+        break;
+      }
+    }
+#endif
     return true;
   }
 

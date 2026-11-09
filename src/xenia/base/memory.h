@@ -84,6 +84,12 @@ enum class DeallocationType {
 // memory-mapped file must be used to write to executable pages.
 bool IsWritableExecutableMemorySupported();
 
+// Optional, set by the app: the memory used by the app and its limit (on UWP
+// the app has its own limit, lower than the memory free in the system).
+using AppMemoryUsageQuery = bool (*)(uint64_t& usage, uint64_t& limit);
+void SetAppMemoryUsageQuery(AppMemoryUsageQuery query);
+bool QueryAppMemoryUsage(uint64_t& usage, uint64_t& limit);
+
 // Whether PageAccess::kExecuteReadWrite is a supported and preferred way of
 // writing executable memory, useful for simulating how Xenia would work without
 // writable executable memory on a system with it.

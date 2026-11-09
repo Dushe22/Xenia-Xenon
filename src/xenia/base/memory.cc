@@ -8,6 +8,8 @@
  */
 
 #include "xenia/base/memory.h"
+
+#include <atomic>
 #include "xenia/base/cvar.h"
 #include "xenia/base/logging.h"
 #include "xenia/base/platform.h"
@@ -24,6 +26,19 @@ DEFINE_bool(
 
 namespace xe {
 namespace memory {
+
+namespace {
+std::atomic<AppMemoryUsageQuery> app_memory_usage_query{nullptr};
+}  // namespace
+
+void SetAppMemoryUsageQuery(AppMemoryUsageQuery query) {
+  app_memory_usage_query = query;
+}
+
+bool QueryAppMemoryUsage(uint64_t& usage, uint64_t& limit) {
+  AppMemoryUsageQuery query = app_memory_usage_query;
+  return query && query(usage, limit);
+}
 
 bool IsWritableExecutableMemoryPreferred() {
   return IsWritableExecutableMemorySupported() &&
