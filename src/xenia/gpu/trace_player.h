@@ -46,6 +46,10 @@ class TracePlayer : public TraceReader {
 
   void WaitOnPlayback();
 
+  // Plays the current frame again from its start, to measure how long the
+  // frame takes. Call WaitOnPlayback to wait for it.
+  void ReplayCurrentFrame();
+
  private:
   void PlayTrace(const uint8_t* trace_data, size_t trace_size,
                  TracePlaybackMode playback_mode, bool clear_caches);

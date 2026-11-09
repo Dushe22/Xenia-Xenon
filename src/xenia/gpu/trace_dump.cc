@@ -15,6 +15,7 @@
 
 #include "third_party/stb/stb_image_write.h"
 #include "xenia/base/byte_order.h"
+#include "xenia/base/clock.h"
 #include "xenia/base/filesystem.h"
 #include "xenia/base/logging.h"
 #include "xenia/base/math.h"
@@ -58,6 +59,11 @@ DEFINE_bool(trace_dump_all_frames, false,
             "capture) and save each one as <output>_f<frame>.png. The main "
             "PNG is then the last frame.",
             "GPU.Debug");
+
+DEFINE_int32(trace_dump_repeat, 0,
+             "Play the first frame again this many times after the dump and "
+             "log how long each replay takes, to profile the GPU emulation.",
+             "GPU.Debug");
 
 namespace xe {
 namespace gpu {
@@ -196,6 +202,24 @@ int TraceDump::Run() {
     }
   }
   EndHostCapture();
+
+  if (cvars::trace_dump_repeat > 0) {
+    player_->SeekFrame(0);
+    double total_ms = 0.0, min_ms = 1e30;
+    for (int32_t i = 0; i < cvars::trace_dump_repeat; ++i) {
+      uint64_t start = Clock::QueryHostTickCount();
+      player_->ReplayCurrentFrame();
+      player_->WaitOnPlayback();
+      double ms = double(Clock::QueryHostTickCount() - start) * 1000.0 /
+                  double(Clock::QueryHostTickFrequency());
+      total_ms += ms;
+      min_ms = std::min(min_ms, ms);
+    }
+    XELOGI("Trace dump: frame replayed {} times, {:.2f} ms average, {:.2f} ms "
+           "fastest",
+           cvars::trace_dump_repeat, total_ms / cvars::trace_dump_repeat,
+           min_ms);
+  }
 
   // Save requested tiled 32bpp textures from guest memory, untiled.
   if (!cvars::trace_dump_textures.empty()) {

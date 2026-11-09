@@ -54,6 +54,16 @@ void TracePlayer::SeekFrame(int target_frame) {
             TracePlaybackMode::kBreakOnSwap, false);
 }
 
+void TracePlayer::ReplayCurrentFrame() {
+  auto frame = current_frame();
+  if (!frame) {
+    return;
+  }
+  current_command_index_ = int(frame->commands.size()) - 1;
+  PlayTrace(frame->start_ptr, frame->end_ptr - frame->start_ptr,
+            TracePlaybackMode::kBreakOnSwap, false);
+}
+
 void TracePlayer::SeekCommand(int target_command) {
   if (current_command_index_ == target_command) {
     return;
